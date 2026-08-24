@@ -1,0 +1,6 @@
+{
+  "description": "Values that must stay the same when the fixtures do not change.",
+  "fixtures": [],
+  "expected_status": "PASS",
+  "expected_kpis": {}
+}

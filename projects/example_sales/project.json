@@ -1,0 +1,343 @@
+{
+  "project_name": "ExampleSales",
+  "title": {
+    "en": "Sales performance",
+    "ar": "أداء المبيعات"
+  },
+  "language": "en",
+  "approval": {
+    "status": "APPROVED",
+    "approved_by": "Example business owner",
+    "approved_on": "2026-08-19",
+    "notes": "Example project shipped with the template. Replace it for a real adaptation."
+  },
+  "business": {
+    "purpose": "Replace the monthly manual sales workbook.",
+    "decision_supported": "Where is revenue growing, and which customers need attention.",
+    "run_frequency": "monthly"
+  },
+  "sources": [
+    {
+      "id": "sales",
+      "title": "Monthly sales export",
+      "match": [
+        "sales_*.xlsx"
+      ],
+      "format": "xlsx",
+      "sheet": "Sales",
+      "header_row": 1,
+      "grain": "One row is one invoice line.",
+      "business_key": [
+        "invoice_no",
+        "line_no"
+      ],
+      "corrections_allowed": true,
+      "missing_record_policy": "keep",
+      "columns": [
+        {
+          "source": "Invoice No",
+          "field": "invoice_no",
+          "type": "text",
+          "required": true
+        },
+        {
+          "source": "Line",
+          "field": "line_no",
+          "type": "integer",
+          "required": true
+        },
+        {
+          "source": "Invoice Date",
+          "field": "invoice_date",
+          "type": "date",
+          "required": true
+        },
+        {
+          "source": "Customer ID",
+          "field": "customer_id",
+          "type": "text",
+          "required": true
+        },
+        {
+          "source": "Product",
+          "field": "product",
+          "type": "text"
+        },
+        {
+          "source": "Quantity",
+          "field": "quantity",
+          "type": "number",
+          "required": true
+        },
+        {
+          "source": "Unit Price",
+          "field": "unit_price",
+          "type": "number",
+          "required": true
+        },
+        {
+          "source": "Amount",
+          "field": "amount",
+          "type": "number",
+          "required": true
+        },
+        {
+          "source": "Status",
+          "field": "status",
+          "type": "text"
+        }
+      ],
+      "filters": [
+        {
+          "field": "status",
+          "operator": "not_equals",
+          "value": "Cancelled"
+        }
+      ],
+      "checks": [
+        {
+          "type": "unique",
+          "fields": [
+            "invoice_no",
+            "line_no"
+          ],
+          "on_fail": "quarantine"
+        },
+        {
+          "type": "range",
+          "field": "quantity",
+          "min": 0,
+          "on_fail": "quarantine"
+        },
+        {
+          "type": "not_future",
+          "field": "invoice_date",
+          "on_fail": "quarantine"
+        },
+        {
+          "type": "allowed_values",
+          "field": "status",
+          "values": [
+            "Posted",
+            "Draft",
+            "Cancelled"
+          ],
+          "on_fail": "quarantine"
+        }
+      ],
+      "control_totals": [
+        {
+          "field": "amount",
+          "precision": 2
+        }
+      ],
+      "extraction": {
+        "mode": "auto",
+        "chunk_rows": 5000,
+        "visible": false
+      }
+    },
+    {
+      "id": "customers",
+      "title": "Customer master",
+      "match": [
+        "customers*.xlsx"
+      ],
+      "format": "xlsx",
+      "sheet": "Customers",
+      "grain": "One row is one customer.",
+      "business_key": [
+        "customer_id"
+      ],
+      "corrections_allowed": true,
+      "missing_record_policy": "keep",
+      "columns": [
+        {
+          "source": "Customer ID",
+          "field": "customer_id",
+          "type": "text",
+          "required": true
+        },
+        {
+          "source": "Customer Name",
+          "field": "customer_name",
+          "type": "text",
+          "required": true
+        },
+        {
+          "source": "Segment",
+          "field": "segment",
+          "type": "text"
+        },
+        {
+          "source": "Country",
+          "field": "country",
+          "type": "text"
+        }
+      ],
+      "checks": [
+        {
+          "type": "unique",
+          "fields": [
+            "customer_id"
+          ],
+          "on_fail": "quarantine"
+        }
+      ],
+      "extraction": {
+        "mode": "auto",
+        "chunk_rows": 5000,
+        "visible": false
+      }
+    }
+  ],
+  "relationships": [
+    {
+      "child": "sales",
+      "child_fields": [
+        "customer_id"
+      ],
+      "parent": "customers",
+      "parent_fields": [
+        "customer_id"
+      ],
+      "on_missing": "warn"
+    }
+  ],
+  "metrics_sql": "sql/metrics.sql",
+  "dashboard": {
+    "kpis": [
+      "customers_served"
+    ],
+    "charts": [],
+    "tables": [
+      "top_customers"
+    ]
+  },
+  "analytics": {
+    "fact_sql": "sql/fact.sql",
+    "date": {
+      "field": "invoice_date",
+      "grain": "month",
+      "title": "Month"
+    },
+    "dimensions": [
+      {
+        "id": "segment",
+        "title": "Customer segment",
+        "field": "segment"
+      },
+      {
+        "id": "product",
+        "title": "Product",
+        "field": "product"
+      },
+      {
+        "id": "country",
+        "title": "Country",
+        "field": "country"
+      }
+    ],
+    "measures": [
+      {
+        "id": "revenue",
+        "title": "Revenue",
+        "field": "amount",
+        "aggregate": "sum",
+        "format": "money",
+        "unit": "SAR",
+        "goal_direction": "up"
+      },
+      {
+        "id": "units",
+        "title": "Units sold",
+        "field": "quantity",
+        "aggregate": "sum",
+        "format": "number",
+        "goal_direction": "up"
+      },
+      {
+        "id": "lines",
+        "title": "Invoice lines",
+        "aggregate": "count",
+        "format": "integer",
+        "goal_direction": "up"
+      },
+      {
+        "id": "average_line",
+        "title": "Average line value",
+        "aggregate": "ratio",
+        "numerator": "revenue",
+        "denominator": "lines",
+        "format": "money",
+        "unit": "SAR",
+        "goal_direction": "up"
+      }
+    ],
+    "charts": [
+      {
+        "id": "revenue_trend",
+        "title": "Revenue over time",
+        "measure": "revenue",
+        "by": "date",
+        "form": "line"
+      },
+      {
+        "id": "revenue_by_segment",
+        "title": "Revenue by customer segment",
+        "measure": "revenue",
+        "by": "segment",
+        "form": "bar"
+      },
+      {
+        "id": "revenue_by_product",
+        "title": "Revenue by product",
+        "measure": "revenue",
+        "by": "product",
+        "form": "bar"
+      },
+      {
+        "id": "units_by_month_segment",
+        "title": "Units by month and segment",
+        "measure": "units",
+        "by": "date",
+        "split": "segment",
+        "form": "stacked"
+      }
+    ],
+    "kpis": [
+      "revenue",
+      "lines",
+      "average_line",
+      "units"
+    ]
+  },
+  "insights": [
+    {
+      "id": "small_average_invoice",
+      "when": {
+        "metric": "average_invoice_value",
+        "operator": "<",
+        "value": 500
+      },
+      "severity": "watch",
+      "title": "Average invoice value is low",
+      "body": "The average invoice is {value}, below the 500 review threshold."
+    }
+  ],
+  "quality_gates": {
+    "block_on_reconciliation_failure": true,
+    "max_rejected_percent": 20,
+    "archive_keep_runs": 10
+  },
+  "database": {
+    "backend": "auto"
+  },
+  "sql_server": {
+    "enabled": false,
+    "connection_string_env": "UEA_SQLSERVER_CONNECTION",
+    "schema": "dbo",
+    "table_prefix": "ExampleSales__",
+    "batch_rows": 2000
+  }
+}

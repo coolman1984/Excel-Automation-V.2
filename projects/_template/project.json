@@ -1,0 +1,127 @@
+{
+  "project_name": "NewProject",
+  "title": {
+    "en": "New report",
+    "ar": "تقرير جديد"
+  },
+  "language": "en",
+  "approval": {
+    "status": "PENDING_APPROVAL",
+    "approved_by": "",
+    "approved_on": "",
+    "notes": "The business owner must confirm the meaning below before the first real run."
+  },
+  "business": {
+    "purpose": "PENDING_APPROVAL - what manual work does this replace?",
+    "decision_supported": "PENDING_APPROVAL - what decision should the dashboard support?",
+    "run_frequency": "PENDING_APPROVAL - daily, weekly or monthly?"
+  },
+  "sources": [
+    {
+      "id": "main",
+      "title": "Main input file",
+      "match": [
+        "*.xlsx"
+      ],
+      "format": "xlsx",
+      "sheet": null,
+      "header_row": 1,
+      "grain": "PENDING_APPROVAL - what does one row represent?",
+      "business_key": [],
+      "corrections_allowed": true,
+      "missing_record_policy": "keep",
+      "columns": [
+        {
+          "source": "Column heading exactly as it appears in Excel",
+          "field": "example_field",
+          "type": "text",
+          "required": true
+        }
+      ],
+      "filters": [],
+      "checks": [],
+      "control_totals": [],
+      "extraction": {
+        "mode": "auto",
+        "chunk_rows": 5000,
+        "visible": false
+      },
+      "update_mode": "UPSERT"
+    }
+  ],
+  "relationships": [],
+  "metrics_sql": "sql/metrics.sql",
+  "dashboard": {},
+  "analytics": {
+    "fact_sql": "sql/fact.sql",
+    "date": {
+      "field": "example_date",
+      "grain": "month",
+      "title": "Month"
+    },
+    "dimensions": [
+      {
+        "id": "example_group",
+        "title": "Group",
+        "field": "example_group"
+      }
+    ],
+    "measures": [
+      {
+        "id": "value",
+        "title": "Value",
+        "field": "example_value",
+        "aggregate": "sum",
+        "format": "number",
+        "goal_direction": "up"
+      },
+      {
+        "id": "rows",
+        "title": "Rows",
+        "aggregate": "count",
+        "format": "integer"
+      }
+    ],
+    "charts": [
+      {
+        "id": "value_trend",
+        "title": "Value over time",
+        "measure": "value",
+        "by": "date",
+        "form": "line"
+      },
+      {
+        "id": "value_by_group",
+        "title": "Value by group",
+        "measure": "value",
+        "by": "example_group",
+        "form": "bar"
+      }
+    ],
+    "kpis": [
+      "value",
+      "rows"
+    ]
+  },
+  "automation": {
+    "watch_folder": "",
+    "check_every_minutes": 10,
+    "process_on_start": false
+  },
+  "insights": [],
+  "quality_gates": {
+    "block_on_reconciliation_failure": true,
+    "max_rejected_percent": 20,
+    "archive_keep_runs": 10
+  },
+  "database": {
+    "backend": "duckdb"
+  },
+  "sql_server": {
+    "enabled": false,
+    "connection_string_env": "UEA_SQLSERVER_CONNECTION",
+    "schema": "dbo",
+    "table_prefix": "NewProject__",
+    "batch_rows": 2000
+  }
+}

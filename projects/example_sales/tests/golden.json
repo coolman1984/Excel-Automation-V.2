@@ -1,0 +1,12 @@
+{
+  "description": "Golden values for the example project fixtures (tools/make_fixtures.py, seed 11).",
+  "fixtures": ["sales_2026Q1.xlsx", "customers.xlsx"],
+  "expected_status": "WARNING",
+  "expected_rows": {"read": 124, "accepted": 121, "needs_attention": 2, "out_of_scope": 1},
+  "expected_kpis": {
+    "total_amount": 298944.47,
+    "invoice_count": 55,
+    "average_invoice_value": 5435.35,
+    "customers_served": 12
+  }
+}

@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Report</title>
+<link rel="stylesheet" href="/styles.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>&#128202;</text></svg>">
+</head>
+<body>
+<a class="skip" href="#main" data-i18n="skip">Skip to content</a>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand-block">
+      <span class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></span>
+      <div>
+        <p class="eyebrow">Trusted Business Intelligence</p>
+        <h1 id="project-title">&nbsp;</h1>
+        <p id="project-purpose" class="muted"></p>
+      </div>
+    </div>
+    <div class="topbar-actions" aria-label="Report actions">
+      <span id="status-pill" class="pill pill-idle" role="status" aria-live="polite"></span>
+      <button id="theme-toggle" type="button" class="icon-action" data-i18n="theme">Dark</button>
+      <button id="lang-toggle" type="button" class="icon-action" aria-label="Change language">العربية</button>
+      <a id="save-copy" class="icon-action" href="#" download data-i18n="saveCopy">Save a copy</a>
+      <button id="print-button" type="button" class="icon-action" data-i18n="print">Print</button>
+    </div>
+  </div>
+</header>
+
+<main id="main" class="workspace">
+  <section class="intake-grid">
+    <section class="card intake-card" id="files-card" aria-labelledby="files-heading">
+      <div class="section-heading">
+        <div>
+          <p class="section-kicker">Input</p>
+          <h2 id="files-heading" data-i18n="filesHeading">1. Add your files</h2>
+        </div>
+        <span class="privacy-badge">Local only</span>
+      </div>
+      <p class="muted" id="files-expected"></p>
+
+      <div id="dropzone" class="dropzone" tabindex="0" role="button"
+           aria-describedby="files-expected" data-i18n="dropzone">
+        Drag your Excel files here, or press to choose them
+      </div>
+      <input id="file-input" type="file" multiple accept=".xlsx,.xlsm,.xls,.xlsb,.csv" hidden>
+      <ul id="file-list" class="file-list"></ul>
+
+      <div class="run-controls">
+        <button id="process-button" type="button" class="primary" data-i18n="process">Process</button>
+        <span id="process-hint" class="muted"></span>
+      </div>
+
+      <div id="progress-wrap" class="progress-wrap" hidden>
+        <div class="progress-topline">
+          <strong data-i18n="working">Working…</strong>
+          <span id="progress-text" class="muted" aria-live="polite"></span>
+        </div>
+        <div class="progress" role="progressbar" aria-valuemin="0" aria-valuemax="100"
+             aria-valuenow="0" id="progress-bar"><span id="progress-fill"></span></div>
+        <div class="state-rail" aria-label="Run stages">
+          <span data-state="DETECTED">Detect</span><span data-state="EXTRACTING">Extract</span>
+          <span data-state="VALIDATING">Validate</span><span data-state="MERGING">History</span>
+          <span data-state="CALCULATING">Calculate</span><span data-state="VERIFYING">Verify</span>
+          <span data-state="COMPLETE">Complete</span>
+        </div>
+      </div>
+    </section>
+
+    <aside class="card trust-card" aria-label="How this report stays trusted">
+      <div class="trust-orb" aria-hidden="true">✓</div>
+      <p class="section-kicker">Built for repeatable work</p>
+      <h2>Verified before it is published</h2>
+      <p class="muted">Source lineage, data-quality rules, recurring history, trusted calculations and an offline dashboard stay together in one run.</p>
+      <div class="mini-flow" aria-hidden="true">
+        <span>Excel</span><b>→</b><span>Trusted data</span><b>→</b><span>Decision</span>
+      </div>
+    </aside>
+  </section>
+
+  <section id="error-card" class="card error-card" hidden aria-labelledby="error-heading">
+    <div class="error-icon" aria-hidden="true">!</div>
+    <div>
+      <h2 id="error-heading"></h2>
+      <p id="error-safe" class="safe-note"></p>
+      <p id="error-action"></p>
+      <details>
+        <summary data-i18n="technicalDetail">Technical detail (for support)</summary>
+        <p id="error-code" class="mono"></p>
+        <pre id="error-detail" class="mono"></pre>
+      </details>
+    </div>
+  </section>
+
+  <section id="result" hidden>
+    <section class="result-hero card" aria-labelledby="summary-heading">
+      <div class="result-copy">
+        <p class="section-kicker">Executive snapshot</p>
+        <h2 id="summary-heading" data-i18n="resultHeading">2. Your result</h2>
+        <p id="run-message" class="run-message"></p>
+      </div>
+      <dl class="run-facts" id="run-facts"></dl>
+    </section>
+
+    <nav class="section-nav" aria-label="Dashboard sections">
+      <a href="#decision-cockpit">Decision brief</a><a href="#kpi-section">Key numbers</a>
+      <a href="#charts-section">Drivers</a><a href="#tables-section">Details</a><a href="#proof-heading">Controls</a>
+    </nav>
+
+    <section class="health-grid" aria-label="Run health">
+      <article class="health-card"><span class="health-icon">✓</span><div><small>Checks passed</small><strong id="quality-score">—</strong></div></article>
+      <article class="health-card"><span class="health-icon">◇</span><div><small>Rows accepted</small><strong id="acceptance-rate">—</strong></div></article>
+      <article class="health-card"><span class="health-icon">↻</span><div><small>Enterprise sync</small><strong id="sync-state">—</strong></div></article>
+      <article class="health-card"><span class="health-icon">◷</span><div><small>Last updated</small><strong id="last-updated">—</strong></div></article>
+      <article class="health-card"><span class="health-icon">◎</span><div><small>Run state</small><strong id="run-state">—</strong></div></article>
+    </section>
+
+    <section id="decision-cockpit" class="decision-cockpit" aria-label="Decision brief">
+      <article class="decision-lead card">
+        <div class="section-heading"><div><p class="section-kicker">Decision brief</p><h2>What deserves attention now</h2></div><span id="decision-badge" class="signal-badge">Verified</span></div>
+        <h3 id="decision-title">No unusual signal</h3><p id="decision-body" class="decision-body">The latest verified result is ready for review.</p>
+        <div id="decision-evidence" class="evidence-chips"></div>
+      </article>
+      <aside class="decision-stack">
+        <article class="mini-decision card"><small>Signals to review</small><strong id="signal-count">0</strong><span id="watch-count">0 watch</span></article>
+        <article class="mini-decision card"><small>Data confidence</small><strong id="confidence-label">High</strong><span id="confidence-note">Verified controls</span></article>
+        <article class="mini-decision card"><small>Source freshness</small><strong id="freshness-label">Current</strong><span id="freshness-note">Latest inputs</span></article>
+      </aside>
+    </section>
+
+    <section id="filters" class="filters card" aria-label="Filters" hidden>
+      <div class="filter-head">
+        <div><p class="section-kicker">Explore</p><h2>Filter the approved data</h2></div>
+        <p class="filter-summary" id="filter-summary" aria-live="polite"></p>
+      </div>
+      <div class="filters-grid" id="filters-grid"></div>
+    </section>
+
+    <section class="section-title-row"><div><p class="section-kicker">Performance</p><h2>Key numbers and momentum</h2></div><p class="muted">Filtered values stay tied to approved pre-aggregations.</p></section>
+    <section id="kpi-section" class="kpi-grid" aria-label="Key numbers"></section>
+
+    <section id="insights-section" class="card insights-panel" aria-labelledby="insights-heading" hidden>
+      <div class="section-heading">
+        <div><p class="section-kicker">Decision signals</p><h2 id="insights-heading" data-i18n="insightsHeading">Highlights</h2></div>
+        <span class="ai-safe-badge">Evidence-backed</span>
+      </div>
+      <ul id="insights-list" class="insights"></ul>
+    </section>
+
+    <section class="section-title-row"><div><p class="section-kicker">Drivers</p><h2>What is moving the result</h2></div><p class="muted">Start with the strongest trend and contributor views.</p></section>
+    <section id="charts-section" class="chart-grid" aria-label="Charts"></section>
+
+    <section class="section-title-row"><div><p class="section-kicker">Detail</p><h2>Investigate the records</h2></div><p class="muted">Search and sort without changing trusted calculations.</p></section>
+
+    <section id="tables-section" class="tables-stack" aria-label="Tables"></section>
+
+    <section class="evidence-grid">
+      <section id="attention-section" class="card" aria-labelledby="attention-heading" hidden>
+        <div class="section-heading">
+          <div><p class="section-kicker">Exceptions</p><h2 id="attention-heading" data-i18n="attentionHeading">Rows needing attention</h2></div>
+          <a id="attention-export" class="ghost" href="#" download data-i18n="download">Download as CSV</a>
+        </div>
+        <p class="muted" id="attention-note"></p>
+        <div class="table-scroll">
+          <table id="attention-table"><thead></thead><tbody></tbody></table>
+        </div>
+      </section>
+
+      <section class="card" aria-labelledby="proof-heading">
+        <div class="section-heading">
+          <div><p class="section-kicker">Controls</p><h2 id="proof-heading" data-i18n="proofHeading">3. Proof the numbers are right</h2></div>
+          <span class="proof-badge">Reconciled</span>
+        </div>
+        <div class="table-scroll">
+          <table id="reconciliation-table"><thead></thead><tbody></tbody></table>
+        </div>
+        <details class="lineage-details">
+          <summary data-i18n="whereFrom">Where did the data come from?</summary>
+          <div id="lineage"></div>
+        </details>
+      </section>
+    </section>
+
+    <section class="card" aria-labelledby="history-heading">
+      <div class="section-heading">
+        <div><p class="section-kicker">Audit trail</p><h2 id="history-heading" data-i18n="historyHeading">Previous runs</h2></div>
+      </div>
+      <div class="table-scroll">
+        <table id="history-table"><thead></thead><tbody></tbody></table>
+      </div>
+    </section>
+  </section>
+
+  <section id="empty-state" class="card empty-state" hidden>
+    <div class="empty-visual" aria-hidden="true">↗</div>
+    <h2 data-i18n="emptyHeading">No result yet</h2>
+    <p class="muted" data-i18n="emptyBody">Add your files above and press Process.</p>
+  </section>
+</main>
+
+<div id="tooltip" class="tooltip" role="tooltip" aria-hidden="true"></div>
+
+<footer class="footer">
+  <span class="footer-dot"></span><span id="footer-note" class="muted"></span>
+</footer>
+
+<script src="/app.js"></script>
+</body>
+</html>

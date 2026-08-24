@@ -1,0 +1,23 @@
+# Runtime data (created by the application, never committed)
+_work/
+release/
+*.db
+*.db-wal
+*.db-shm
+*.log
+
+# Private runtime binaries: downloaded once, never committed
+runtime_inputs/python-windows/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Editors and operating systems
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+~$*
