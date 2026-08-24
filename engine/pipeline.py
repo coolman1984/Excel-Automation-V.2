@@ -450,7 +450,7 @@ def _record_failure(connection, result: RunResult) -> None:
 def _write_events(connection, run_id: str, events) -> None:
     try:
         connection.executemany(
-            "INSERT OR REPLACE INTO run_events(run_id, seq, at, step, percent, message)"
+            "INSERT OR REPLACE INTO run_events(run_id, seq, \"at\", step, percent, message)"
             " VALUES (?,?,?,?,?,?)",
             [(run_id, index, _dt.datetime.now().isoformat(timespec="seconds"),
               step, percent, message) for index, (step, percent, message) in enumerate(events)])

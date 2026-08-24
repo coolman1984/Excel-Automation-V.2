@@ -75,7 +75,7 @@ CREATE TABLE IF NOT EXISTS insights (
 CREATE TABLE IF NOT EXISTS run_events (
     run_id     TEXT NOT NULL,
     seq        INTEGER NOT NULL,
-    at         TEXT NOT NULL,
+    "at"       TEXT NOT NULL,     -- quoted: AT is a reserved word in DuckDB
     step       TEXT NOT NULL,
     percent    INTEGER NOT NULL,
     message    TEXT NOT NULL,

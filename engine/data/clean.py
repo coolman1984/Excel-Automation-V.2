@@ -247,7 +247,8 @@ def _run_checks(connection, run_id: str, source, table: str) -> tuple[int, int]:
             rows = []
             kept: dict[tuple, int] = {}
             for duplicate in duplicates:
-                clause = " AND ".join(f"{database.quote(f)} IS ?" for f in fields)
+                clause = " AND ".join(
+                    database.null_safe_eq(connection, database.quote(f), "?") for f in fields)
                 group = sorted(_fetch(connection, table, clause, tuple(duplicate)),
                                key=lambda row: (row["_file"], row["_row_no"]))
                 # The first occurrence is the record; only the repeats are rejected.

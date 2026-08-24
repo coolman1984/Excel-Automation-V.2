@@ -232,14 +232,19 @@ def relationships(connection, config, run_id: str) -> list[Check]:
         if not child_fields:
             continue
         join = " AND ".join(
-            f"c.{database.quote(cf)} IS p.{database.quote(pf)}"
+            database.null_safe_eq(connection, f"c.{database.quote(cf)}",
+                                  f"p.{database.quote(pf)}")
             for cf, pf in zip(child_fields, parent_fields))
         not_null = " AND ".join(f"c.{database.quote(cf)} IS NOT NULL" for cf in child_fields)
+        # Every child key here is non-null, so a matched parent has a non-null key
+        # too: a null parent key is exactly a row with no match. ROWID would say the
+        # same thing on SQLite but is not dependable on the right side of a join.
+        unmatched = f"p.{database.quote(parent_fields[0])} IS NULL"
         missing = database.scalar(
             connection,
             f"SELECT COUNT(*) FROM {database.quote(clean_table(child.id))} c "
             f"LEFT JOIN {database.quote(clean_table(parent.id))} p ON {join} "
-            f"WHERE {not_null} AND p.ROWID IS NULL") or 0
+            f"WHERE {not_null} AND {unmatched}") or 0
         status = "PASS" if not missing else ("BLOCK" if on_missing == "block" else "WARNING")
         if on_missing == "ignore":
             status = "PASS"

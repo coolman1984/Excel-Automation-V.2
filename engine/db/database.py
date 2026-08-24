@@ -15,6 +15,8 @@ import sqlite3
 from collections.abc import Iterable, Iterator, Sequence
 from typing import Any
 
+from engine.logging_setup import logger
+
 MIGRATIONS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "migrations")
 
 SQL_TYPE = {
@@ -169,7 +171,11 @@ def connect(path: str, backend: str | None = None) -> Connection:
     """
 
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
-    requested = (backend or os.environ.get("UEA_DB_BACKEND") or "auto").lower()
+    requested = (backend or "auto").lower()
+    if requested == "auto":
+        # A project asking for "auto" is deferring the choice, so the environment
+        # gets to make it. That is what lets the suite pin a backend and run twice.
+        requested = (os.environ.get("UEA_DB_BACKEND") or "auto").lower()
     if requested not in {"auto", "duckdb", "sqlite"}:
         raise ValueError(f"unsupported database backend: {requested}")
 
@@ -178,14 +184,18 @@ def connect(path: str, backend: str | None = None) -> Connection:
         raw = duckdb.connect(path)
         # Conservative local analytics defaults: allow spilling instead of crashing
         # on wide/large workbooks, and keep temporary data beside the private DB.
-        try:
-            raw.execute("PRAGMA enable_object_cache")
-            temp_dir = os.path.abspath(path) + ".tmp"
-            os.makedirs(temp_dir, exist_ok=True)
-            raw.execute("SET temp_directory = ?", [temp_dir])
-            raw.execute("SET preserve_insertion_order = false")
-        except Exception:
-            pass
+        # Spilling to disk instead of failing on a wide workbook is the whole point
+        # of these settings, so they are applied individually and logged when one is
+        # not available. DuckDB's SET takes no bound parameters - passing one used to
+        # raise inside a bare except, which silently disabled the spill directory.
+        temp_dir = os.path.abspath(path) + ".spill"
+        os.makedirs(temp_dir, exist_ok=True)
+        for statement in (f"SET temp_directory = '{temp_dir}'",
+                          "SET preserve_insertion_order = false"):
+            try:
+                raw.execute(statement)
+            except Exception as exc:  # pragma: no cover - depends on the DuckDB build
+                logger().debug("duckdb setting not applied (%s): %s", statement, exc)
         return Connection(raw, "duckdb")
     if requested == "duckdb":
         raise RuntimeError(
@@ -217,6 +227,19 @@ def migrate(connection: Connection) -> list[str]:
                            (name, _dt.datetime.now().isoformat(timespec="seconds")))
         applied.append(name)
     return applied
+
+
+def null_safe_eq(connection: Connection, left: str, right: str) -> str:
+    """``left`` equals ``right``, treating NULL as a comparable value.
+
+    SQLite spells this ``a IS b``; DuckDB only accepts the standard
+    ``a IS NOT DISTINCT FROM b`` and fails to parse the SQLite form. The engine
+    builds these comparisons itself, so it asks here rather than guessing.
+    """
+
+    if connection.backend == "duckdb":
+        return f"{left} IS NOT DISTINCT FROM {right}"
+    return f"{left} IS {right}"
 
 
 def quote(identifier: str) -> str:

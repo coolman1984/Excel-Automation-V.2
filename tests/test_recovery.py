@@ -6,12 +6,12 @@ import datetime as _dt
 import json
 import os
 import shutil
-import sqlite3
 import unittest
 
 from tests.helpers import (edit_config, example_workspace, project_copy, remove_all)
 
 from engine import config as config_module, pipeline
+from engine.db import database
 from engine.data import archive
 from engine.excel.xlsx_writer import write_sheet
 
@@ -45,7 +45,8 @@ class RecoveryTest(unittest.TestCase):
         return pipeline.run(config_module.load(self.project), self.workspace)
 
     def _history(self):
-        connection = sqlite3.connect(self.workspace.database)
+        # Through the engine, so this test is true on whichever backend ran.
+        connection = database.connect(self.workspace.database)
         try:
             return connection.execute("SELECT COUNT(*), SUM(amount) FROM hist__sales").fetchone()
         finally:

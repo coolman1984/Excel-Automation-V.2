@@ -65,7 +65,7 @@ def settings(config) -> dict:
 def _record(local, run_id: str, result: SyncResult) -> None:
     try:
         local.execute(
-            "INSERT OR REPLACE INTO sync_events(run_id, target, status, at, detail_json) "
+            "INSERT OR REPLACE INTO sync_events(run_id, target, status, \"at\", detail_json) "
             "VALUES (?,?,?,?,?)",
             (run_id, "sql_server", result.status,
              _dt.datetime.now().isoformat(timespec="seconds"),

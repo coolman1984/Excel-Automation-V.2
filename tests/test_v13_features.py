@@ -5,11 +5,11 @@ from __future__ import annotations
 import datetime as _dt
 import json
 import os
-import sqlite3
 import unittest
 
 from tests.helpers import edit_config, example_workspace, project_copy, remove_all
 from engine import config as config_module, pipeline
+from engine.db import database
 from engine.excel.xlsx_writer import write_sheet
 
 HEADERS = ["Invoice No", "Line", "Invoice Date", "Customer ID", "Product", "Quantity",
@@ -39,8 +39,8 @@ class V13FeatureTest(unittest.TestCase):
         return pipeline.run(config_module.load(self.project), self.workspace)
 
     def db_rows(self):
-        db = sqlite3.connect(self.workspace.database)
-        db.row_factory = sqlite3.Row
+        # Through the engine, so this test is true on whichever backend ran.
+        db = database.connect(self.workspace.database)
         try:
             return db.execute("SELECT _bk, _status, invoice_date, amount FROM hist__sales ORDER BY _bk").fetchall()
         finally:

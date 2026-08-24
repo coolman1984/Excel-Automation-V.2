@@ -5,12 +5,12 @@ from __future__ import annotations
 import datetime as _dt
 import json
 import os
-import sqlite3
 import unittest
 
 from tests.helpers import (edit_config, example_workspace, project_copy, remove_all, temp_dir)
 
 from engine import config as config_module, pipeline
+from engine.db import database
 from engine.excel.xlsx_writer import write_sheet
 
 HEADERS = ["Invoice No", "Line", "Invoice Date", "Customer ID", "Product", "Quantity",
@@ -39,9 +39,9 @@ class HistoryTest(unittest.TestCase):
     def run_once(self):
         return pipeline.run(config_module.load(self.project), self.workspace)
 
-    def history_rows(self) -> list[sqlite3.Row]:
-        connection = sqlite3.connect(self.workspace.database)
-        connection.row_factory = sqlite3.Row
+    def history_rows(self) -> list:
+        # Through the engine, so this test is true on whichever backend ran.
+        connection = database.connect(self.workspace.database)
         try:
             return connection.execute(
                 "SELECT _bk, _version, _status, amount FROM hist__sales ORDER BY _bk").fetchall()
