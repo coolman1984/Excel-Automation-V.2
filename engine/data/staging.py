@@ -10,8 +10,10 @@ from __future__ import annotations
 
 import dataclasses
 import datetime as _dt
+import json
 import os
 
+from engine.data import structure
 from engine.db import database
 from engine.errors import user_error
 from engine.excel import com_reader, csv_reader, xlsx_reader
@@ -26,6 +28,11 @@ class StageResult:
     rows_read: int
     files: list[str]
     missing_optional_columns: list[str]
+    rows_seen: int = 0
+    rows_excluded: int = 0
+    excluded_by_class: dict = dataclasses.field(default_factory=dict)
+    declared_totals: list = dataclasses.field(default_factory=list)
+    suspected_totals: list = dataclasses.field(default_factory=list)
 
 
 def stage_table(source_id: str) -> str:
@@ -94,6 +101,11 @@ def stage(connection, run_id: str, source, files) -> StageResult:
     columns = [c[0] for c in LINEAGE_COLUMNS] + [c.field for c in source.columns]
 
     rows_read = 0
+    rows_seen = 0
+    rows_excluded = 0
+    excluded_by_class: dict[str, int] = {}
+    declared_totals: list = []
+    suspected_totals: list = []
     missing_optional: list[str] = []
     extraction = source.extraction or {}
     requested_chunk = max(250, int(extraction.get("chunk_rows", 5000)))
@@ -143,15 +155,34 @@ def stage(connection, run_id: str, source, files) -> StageResult:
         batch_limit = max(250, min(requested_chunk, max(250, 120000 // max(1, len(columns)))))
         batch: list[list[object]] = []
         file_rows = 0
+        file_seen = 0
+        file_excluded = 0
+        classifier = structure.Classifier(source)
+
         for row_number, values in row_iter:
-            record: list[object] = [run_id, discovered.file_name, discovered.sha256, row_number]
+            if classifier.should_stop(row_number):
+                break
+            file_seen += 1
+            mapped: dict[str, object] = {}
             for column in source.columns:
                 index = positions.get(column.field)
                 value = values[index] if index is not None and index < len(values) else None
                 text_value = _as_text(value)
                 if text_value is not None and column.trim:
                     text_value = text_value.strip()
-                record.append(text_value)
+                mapped[column.field] = text_value
+
+            verdict = classifier.classify(row_number, mapped)
+            if not verdict.is_data:
+                file_excluded += 1
+                excluded_by_class[verdict.kind] = excluded_by_class.get(verdict.kind, 0) + 1
+                _record_excluded(connection, run_id, source.id, discovered.file_name,
+                                 row_number, verdict, mapped)
+                continue
+
+            mapped = classifier.enrich(mapped)
+            record: list[object] = [run_id, discovered.file_name, discovered.sha256, row_number]
+            record.extend(mapped.get(column.field) for column in source.columns)
             batch.append(record)
             file_rows += 1
             if len(batch) >= batch_limit:
@@ -161,10 +192,44 @@ def stage(connection, run_id: str, source, files) -> StageResult:
         if batch:
             database.insert_many(connection, table, columns, batch)
             rows_read += len(batch)
+
+        rows_seen += file_seen
+        rows_excluded += file_excluded
+        declared_totals.extend((discovered.file_name, total)
+                               for total in classifier.declared_totals)
+        suspected_totals.extend((discovered.file_name, item)
+                                for item in classifier.suspicions)
+        _record_declared_totals(connection, run_id, source.id, discovered.file_name,
+                                classifier.declared_totals)
         connection.execute(
-            "UPDATE run_files SET rows_read = ? WHERE run_id = ? AND source_id = ? AND file_name = ?",
-            (file_rows, run_id, source.id, discovered.file_name))
+            "UPDATE run_files SET rows_read = ?, rows_seen = ?, rows_excluded = ?"
+            " WHERE run_id = ? AND source_id = ? AND file_name = ?",
+            (file_rows, file_seen, file_excluded, run_id, source.id, discovered.file_name))
 
     return StageResult(source_id=source.id, rows_read=rows_read,
                        files=[f.file_name for f in files],
-                       missing_optional_columns=missing_optional)
+                       missing_optional_columns=missing_optional,
+                       rows_seen=rows_seen, rows_excluded=rows_excluded,
+                       excluded_by_class=excluded_by_class,
+                       declared_totals=declared_totals,
+                       suspected_totals=suspected_totals)
+
+
+def _record_excluded(connection, run_id: str, source_id: str, file_name: str, row_number: int,
+                     verdict, values: dict) -> None:
+    connection.execute(
+        "INSERT OR REPLACE INTO excluded_rows(run_id, source_id, file_name, excel_row,"
+        " row_class, reason, row_json) VALUES (?,?,?,?,?,?,?)",
+        (run_id, source_id, file_name, row_number, verdict.kind, verdict.reason,
+         json.dumps(values, ensure_ascii=False, default=str)))
+
+
+def _record_declared_totals(connection, run_id: str, source_id: str, file_name: str,
+                            totals: list) -> None:
+    for total in totals:
+        connection.execute(
+            "INSERT OR REPLACE INTO source_totals(run_id, source_id, file_name, excel_row,"
+            " field, declared, data_sum, covers, matched, confirmed) VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (run_id, source_id, file_name, total.excel_row, total.field, str(total.declared),
+             str(total.data_sum), total.covers, 1 if total.matched else 0,
+             1 if total.confirmed_by_arithmetic else 0))

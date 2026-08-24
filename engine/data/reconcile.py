@@ -14,7 +14,7 @@ import dataclasses
 import json
 from decimal import Decimal
 
-from engine.data import types
+from engine.data import structure, types
 from engine.data.clean import clean_table
 from engine.data.staging import stage_table
 from engine.db import database
@@ -41,6 +41,73 @@ def _decimal(text: object) -> Decimal | None:
         return types.parse_decimal(str(text))
     except types.ParseError:
         return None
+
+
+def _plural(count: int, noun: str) -> str:
+    return f"{count} {noun}" if count == 1 else f"{count} {noun}s"
+
+
+def structure_checks(run_id: str, source, staged) -> list[Check]:
+    """Prove where the layout rows went, and test the file against its own totals.
+
+    ``row_accounting`` is bookkeeping: every row the reader saw is either data or a
+    named layout row. ``source_declared_total_*`` is the one control here that is
+    not the system checking itself - the file states a total, and we compare it
+    against the rows we kept.
+    """
+
+    checks: list[Check] = []
+    if staged is None:
+        return checks
+
+    counted = staged.rows_read + staged.rows_excluded
+    detail = ", ".join(_plural(count, structure.CLASS_TITLES.get(kind, kind).lower())
+                       for kind, count in sorted(staged.excluded_by_class.items()))
+    actual = _plural(staged.rows_read, "data row")
+    if detail:
+        actual += f" + {detail}"
+    checks.append(Check(
+        source_id=source.id, name="row_accounting",
+        expected=f"{_plural(staged.rows_seen, 'row')} present in the file",
+        actual=actual,
+        difference=str(staged.rows_seen - counted),
+        status="PASS" if staged.rows_seen == counted else "BLOCK"))
+
+    config = structure.settings(source)
+    verify = config["verify_totals_against_data"]
+    on_mismatch = config["on_total_mismatch"]
+    by_field: dict[str, list] = {}
+    for file_name, total in staged.declared_totals:
+        by_field.setdefault(total.field, []).append((file_name, total))
+
+    for field, entries in sorted(by_field.items()):
+        unmatched = [(f, t) for f, t in entries if not t.matched]
+        if unmatched:
+            file_name, total = unmatched[0]
+            status = "BLOCK" if (verify and on_mismatch == "block") else "WARNING"
+            expected = f"{total.declared} stated on row {total.excel_row} of {file_name}"
+            actual = f"{total.data_sum} in the rows it covers"
+            difference = str(total.declared - total.data_sum)
+        else:
+            status = "PASS"
+            expected = f"{_plural(len(entries), 'total line')} stated by the file"
+            actual = "every one agrees with the rows it covers"
+            difference = "0"
+        checks.append(Check(source_id=source.id, name=f"source_declared_total_{field}",
+                            expected=expected, actual=actual, difference=difference,
+                            status=status))
+
+    if staged.suspected_totals:
+        rows = ", ".join(f"row {item.excel_row} ({item.text!r})"
+                         for _f, item in staged.suspected_totals[:5])
+        checks.append(Check(
+            source_id=source.id, name="rows_that_may_be_totals",
+            expected="every row counted as data is a business record",
+            actual=(f"{_plural(len(staged.suspected_totals), 'row')} mention a total"
+                    f" but were kept: {rows}"),
+            difference=str(len(staged.suspected_totals)),
+            status="WARNING"))
+    return checks
 
 
 def run(connection, run_id: str, source, history_result=None) -> list[Check]:

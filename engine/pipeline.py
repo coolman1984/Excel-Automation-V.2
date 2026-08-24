@@ -56,6 +56,7 @@ class RunResult:
     rows_clean: int = 0
     rows_rejected: int = 0
     rows_filtered: int = 0
+    rows_excluded: int = 0
     files: list[dict] = dataclasses.field(default_factory=list)
     reconciliation: list[dict] = dataclasses.field(default_factory=list)
     sources: list[dict] = dataclasses.field(default_factory=list)
@@ -190,9 +191,12 @@ def run(config: config_module.ProjectConfig, workspace, progress: ProgressCallba
             # Opening and extraction are performed by the staging adapter. OPENING is a visible
             # state because protected Excel may spend time authorizing the workbook before rows flow.
             emit(*_step("EXTRACTING"))
+            staged_results: dict[str, staging.StageResult] = {}
             for source in config.sources:
                 staged = staging.stage(connection, run_id, source, discovered[source.id])
+                staged_results[source.id] = staged
                 result.rows_in += staged.rows_read
+                result.rows_excluded += staged.rows_excluded
 
             emit(*_step("VALIDATING"))
             cleaned: dict[str, clean.CleanResult] = {}
@@ -222,6 +226,8 @@ def run(config: config_module.ProjectConfig, workspace, progress: ProgressCallba
                                                            quarantine_writer)
 
             for source in config.sources:
+                checks.extend(reconcile.structure_checks(run_id, source,
+                                                         staged_results.get(source.id)))
                 checks.extend(reconcile.run(connection, run_id, source, history_results[source.id]))
             checks.extend(reconcile.relationships(connection, config, run_id))
             reconcile.save(connection, run_id, checks)
@@ -240,6 +246,8 @@ def run(config: config_module.ProjectConfig, workspace, progress: ProgressCallba
                     "rows_clean": outcome.rows_clean,
                     "rows_rejected": outcome.rows_rejected + merged.corrections_blocked,
                     "rows_filtered": outcome.rows_filtered,
+                    "rows_excluded": staged_results[source.id].rows_excluded,
+                    "excluded_by_class": staged_results[source.id].excluded_by_class,
                     "new_records": merged.inserted,
                     "corrected_records": merged.corrected,
                     "unchanged_records": merged.unchanged,
@@ -409,7 +417,8 @@ def _manifest(config, result: RunResult) -> dict:
         "database_backend": result.database_backend,
         "files": result.files,
         "rows": {"in": result.rows_in, "clean": result.rows_clean,
-                 "rejected": result.rows_rejected, "filtered": result.rows_filtered},
+                 "rejected": result.rows_rejected, "filtered": result.rows_filtered,
+                 "excluded": result.rows_excluded},
         "reconciliation": result.reconciliation,
         "python": platform.python_version(),
         "platform": platform.platform(),

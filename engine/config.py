@@ -16,6 +16,7 @@ import json
 import os
 from typing import Any
 
+from engine.data import structure
 from engine.errors import user_error
 
 FIELD_TYPES = {"text", "number", "integer", "date", "datetime", "boolean"}
@@ -26,7 +27,7 @@ _SOURCE_KEYS = {
     "id", "title", "required", "match", "format", "sheet", "header_row", "delimiter",
     "grain", "business_key", "corrections_allowed", "missing_record_policy",
     "columns", "checks", "control_totals", "filters", "notes", "extraction",
-    "update_mode", "period_field",
+    "update_mode", "period_field", "structure",
 }
 _COLUMN_KEYS = {"source", "field", "type", "required", "trim", "default", "date_formats", "notes"}
 _ROOT_KEYS = {
@@ -64,6 +65,7 @@ class Source:
     corrections_allowed: bool = True
     missing_record_policy: str = "keep"
     extraction: dict = dataclasses.field(default_factory=dict)
+    structure: dict = dataclasses.field(default_factory=dict)
     update_mode: str = "UPSERT"
     period_field: str = ""
     checks: list[dict] = dataclasses.field(default_factory=list)
@@ -222,6 +224,27 @@ def _parse_source(index: int, data: dict) -> Source:
         _fail(where, f"extraction.mode '{extraction_mode}' is not supported",
               "Use auto, direct, or excel_com.")
 
+    layout = dict(data.get("structure") or {})
+    _check_unknown(f"{where}.structure", layout, structure.SETTING_KEYS)
+    unknown_label_fields = [f for f in (layout.get("total_label_fields") or [])
+                            if f not in fields]
+    if unknown_label_fields:
+        _fail(f"{where}.structure",
+              f"total_label_fields refers to unmapped field(s) {unknown_label_fields}",
+              "Map those columns first, or use their mapped field names.")
+    on_mismatch = str(layout.get("on_total_mismatch", "block")).lower()
+    if on_mismatch not in {"block", "warn"}:
+        _fail(f"{where}.structure", f"on_total_mismatch '{on_mismatch}' is not supported",
+              'Use "block" (safest: refuse to publish) or "warn".')
+    section_field = layout.get("capture_section_headers_into")
+    if section_field and section_field not in fields:
+        _fail(f"{where}.structure",
+              f"capture_section_headers_into '{section_field}' is not mapped",
+              "Map that column first; the section label is written into it.")
+    if int(layout.get("stop_after_blank_rows", 0) or 0) < 0:
+        _fail(f"{where}.structure", "stop_after_blank_rows cannot be negative",
+              "Use 0 to read the whole sheet, or the number of blank rows that ends the data.")
+
     for position, check in enumerate(data.get("checks", [])):
         location = f"{where}.checks[{position}]"
         kind = check.get("type")
@@ -259,6 +282,7 @@ def _parse_source(index: int, data: dict) -> Source:
         corrections_allowed=bool(data.get("corrections_allowed", True)),
         missing_record_policy=policy,
         extraction=extraction,
+        structure=layout,
         update_mode=update_mode,
         period_field=period_field,
         checks=list(data.get("checks", [])),
