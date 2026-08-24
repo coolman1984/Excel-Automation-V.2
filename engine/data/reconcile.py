@@ -97,6 +97,18 @@ def structure_checks(run_id: str, source, staged) -> list[Check]:
                             expected=expected, actual=actual, difference=difference,
                             status=status))
 
+    if staged.header_moves:
+        parts = "; ".join(f"{file_name}: header found on row {found} instead of the "
+                          f"configured row {hint}"
+                          for file_name, hint, found in staged.header_moves[:8])
+        checks.append(Check(
+            source_id=source.id, name="header_location",
+            expected="the header sits on the configured row in every file",
+            actual=(f"{_plural(len(staged.header_moves), 'file')} had the header on a "
+                    f"different row than configured: {parts}"),
+            difference=str(len(staged.header_moves)),
+            status="WARNING"))
+
     if staged.guessed_columns:
         parts = "; ".join(f"{file_name}: {resolution.describe()}"
                           for file_name, resolution in staged.guessed_columns[:8])

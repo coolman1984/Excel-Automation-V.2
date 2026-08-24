@@ -129,3 +129,25 @@ def read_block(path: str, delimiter: str | None = None, header_row: int = 1,
                max_rows: int | None = None) -> tuple[list[str], list[tuple[int, list[object]]]]:
     headers, _, _ = inspect(path, delimiter, header_row)
     return headers, list(iter_rows(path, delimiter, header_row, max_rows))
+
+
+def sample_rows(path: str, delimiter: str | None = None,
+                limit: int = 25) -> list[tuple[int, list[object]]]:
+    """The first ``limit`` physical rows, blank ones included, with no header
+    row assumed yet. Used only to locate the header itself - see
+    :mod:`engine.excel.layout` - never to read data.
+    """
+
+    encoding = _encoding(path)
+    delim = _dialect(path, encoding, delimiter)
+    rows: list[tuple[int, list[object]]] = []
+    try:
+        with open(path, "r", encoding=encoding, newline="") as handle:
+            reader = csv.reader(handle, delimiter=delim)
+            for index, values in enumerate(reader, start=1):
+                rows.append((index, list(values)))
+                if index >= limit:
+                    break
+    except (OSError, UnicodeError, csv.Error) as exc:
+        raise user_error("E-IN-002", "Re-save the file and add it again.", detail=f"{path}: {exc}") from exc
+    return rows

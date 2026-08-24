@@ -16,7 +16,7 @@ import os
 from engine.data import resolve, structure
 from engine.db import database
 from engine.errors import user_error
-from engine.excel import com_reader, csv_reader, xlsx_reader
+from engine.excel import com_reader, csv_reader, layout, xlsx_reader
 
 LINEAGE_COLUMNS = [("_run_id", "TEXT"), ("_file", "TEXT"), ("_sha256", "TEXT"),
                    ("_row_no", "INTEGER")]
@@ -34,6 +34,7 @@ class StageResult:
     declared_totals: list = dataclasses.field(default_factory=list)
     suspected_totals: list = dataclasses.field(default_factory=list)
     guessed_columns: list = dataclasses.field(default_factory=list)   # (file_name, Resolution)
+    header_moves: list = dataclasses.field(default_factory=list)       # (file_name, hint, found)
 
 
 def stage_table(source_id: str) -> str:
@@ -107,6 +108,7 @@ def stage(connection, run_id: str, source, files) -> StageResult:
     declared_totals: list = []
     suspected_totals: list = []
     guessed_columns: list = []
+    header_moves: list = []
     missing_optional: list[str] = []
     extraction = source.extraction or {}
     requested_chunk = max(250, int(extraction.get("chunk_rows", 5000)))
@@ -117,30 +119,52 @@ def stage(connection, run_id: str, source, files) -> StageResult:
         use_com = mode == "excel_com" or ext in {".xls", ".xlsb"}
 
         if source.format == "csv":
+            sample = csv_reader.sample_rows(discovered.workspace_path, delimiter=source.delimiter,
+                                            limit=source.header_search_rows)
+            location = layout.find_header(sample, source, source.header_row,
+                                          source.header_search_rows)
+            if location.moved:
+                header_moves.append((discovered.file_name, source.header_row, location.row_number))
             headers, _, _ = csv_reader.inspect(discovered.workspace_path,
                                                 delimiter=source.delimiter,
-                                                header_row=source.header_row)
+                                                header_row=location.row_number)
             row_iter = csv_reader.iter_rows(discovered.workspace_path,
                                              delimiter=source.delimiter,
-                                             header_row=source.header_row,
+                                             header_row=location.row_number,
                                              strict_width=False)
         elif use_com:
+            # The header-search above samples only the direct .xlsx/.csv readers this
+            # environment can prove; the COM route for protected workbooks keeps using
+            # the configured header_row exactly as before.
             com_blocks = com_reader.iter_blocks(discovered.workspace_path, sheet=source.sheet,
                 header_row=source.header_row, chunk_rows=requested_chunk,
                 visible=bool(extraction.get("visible", False)))
             headers, _ = next(com_blocks)
             row_iter = (row for _headers, block in com_blocks for row in block)
         elif mode == "direct":
+            sample = list(xlsx_reader.Workbook(discovered.workspace_path).iter_rows(
+                sheet=source.sheet, max_rows=source.header_search_rows))
+            location = layout.find_header(sample, source, source.header_row,
+                                          source.header_search_rows)
+            if location.moved:
+                header_moves.append((discovered.file_name, source.header_row, location.row_number))
             headers = xlsx_reader.inspect(discovered.workspace_path, sheet=source.sheet,
-                                          header_row=source.header_row)
+                                          header_row=location.row_number)
             row_iter = xlsx_reader.iter_data_rows(discovered.workspace_path, sheet=source.sheet,
-                                                   header_row=source.header_row)
+                                                   header_row=location.row_number)
         else:
             try:
+                sample = list(xlsx_reader.Workbook(discovered.workspace_path).iter_rows(
+                    sheet=source.sheet, max_rows=source.header_search_rows))
+                location = layout.find_header(sample, source, source.header_row,
+                                              source.header_search_rows)
                 headers = xlsx_reader.inspect(discovered.workspace_path, sheet=source.sheet,
-                                              header_row=source.header_row)
+                                              header_row=location.row_number)
                 row_iter = xlsx_reader.iter_data_rows(discovered.workspace_path, sheet=source.sheet,
-                                                       header_row=source.header_row)
+                                                       header_row=location.row_number)
+                if location.moved:
+                    header_moves.append(
+                        (discovered.file_name, source.header_row, location.row_number))
             except Exception:
                 if not com_reader.available():
                     raise
@@ -238,7 +262,8 @@ def stage(connection, run_id: str, source, files) -> StageResult:
                        excluded_by_class=excluded_by_class,
                        declared_totals=declared_totals,
                        suspected_totals=suspected_totals,
-                       guessed_columns=guessed_columns)
+                       guessed_columns=guessed_columns,
+                       header_moves=header_moves)
 
 
 def _record_excluded(connection, run_id: str, source_id: str, file_name: str, row_number: int,

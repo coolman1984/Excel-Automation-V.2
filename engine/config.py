@@ -27,7 +27,7 @@ _SOURCE_KEYS = {
     "id", "title", "required", "match", "format", "sheet", "header_row", "delimiter",
     "grain", "business_key", "corrections_allowed", "missing_record_policy",
     "columns", "checks", "control_totals", "filters", "notes", "extraction",
-    "update_mode", "period_field", "structure", "column_order",
+    "update_mode", "period_field", "structure", "column_order", "header_search_rows",
 }
 _COLUMN_KEYS = {"source", "field", "type", "required", "trim", "default", "date_formats",
                 "notes", "scale", "aliases"}
@@ -70,6 +70,7 @@ class Source:
     extraction: dict = dataclasses.field(default_factory=dict)
     structure: dict = dataclasses.field(default_factory=dict)
     column_order: str = "unstable"
+    header_search_rows: int = 25
     update_mode: str = "UPSERT"
     period_field: str = ""
     checks: list[dict] = dataclasses.field(default_factory=list)
@@ -265,6 +266,12 @@ def _parse_source(index: int, data: dict) -> Source:
               'Use "unstable" (default; positions may vary between files) or "stable" '
               '(positions do not change, enabling a positional fallback match).')
 
+    header_search_rows = int(data.get("header_search_rows", 25))
+    if header_search_rows < 1:
+        _fail(where, "header_search_rows must be at least 1",
+              "Set header_search_rows to how many rows from the top of the sheet may "
+              "be searched for the real header - 25 is a reasonable default.")
+
     for position, check in enumerate(data.get("checks", [])):
         location = f"{where}.checks[{position}]"
         kind = check.get("type")
@@ -304,6 +311,7 @@ def _parse_source(index: int, data: dict) -> Source:
         extraction=extraction,
         structure=layout,
         column_order=column_order,
+        header_search_rows=header_search_rows,
         update_mode=update_mode,
         period_field=period_field,
         checks=list(data.get("checks", [])),
