@@ -33,7 +33,9 @@ naming the exact path, so a typo costs one line of output rather than a run.
 | `match` | string or array | — | File name patterns, e.g. `["sales_*.xlsx"]`. |
 | `format` | string | `xlsx` | `xlsx` or `csv`. |
 | `sheet` | string, integer or null | first tab | Tab name or index. |
-| `header_row` | integer | `1` | The Excel row holding the headings. |
+| `header_row` | integer | `1` | The Excel row holding the headings. A **hint**, not a hard requirement: see `header_search_rows` below - a banner row added above it does not need this changed. |
+| `header_search_rows` | integer | `25` | How many rows from the top of the sheet may be searched for the real header when `header_row` no longer looks right. Raise it for a file with an unusually tall banner; lower it toward `1` to disable the search and require an exact match, e.g. for a source where any drift should always block. |
+| `column_order` | string | `unstable` | `stable` enables a positional fallback: an unresolved required column takes the same position it holds in this list, matched to the same position in the file. Never applied to a `business_key` or `control_totals` field. Use only when the file's column order is genuinely guaranteed by its source system. |
 | `delimiter` | string or null | detect | CSV only. |
 | `required` | boolean | `true` | `false` lets a run proceed without this file. |
 | `grain` | string | `""` | One sentence: what a row represents. |
@@ -43,6 +45,7 @@ naming the exact path, so a typo costs one line of output rather than a run.
 | `update_mode` | string | inferred | `APPEND`, `UPSERT`, `SNAPSHOT`, or `REPLACE_PERIOD`. Prefer this explicit V13 setting. |
 | `period_field` | string | `""` | Required by `REPLACE_PERIOD`; identifies the exact business period being replaced. |
 | `extraction` | object | `{"mode":"auto"}` | `mode`: `auto`, `direct`, or `excel_com`; optional `chunk_rows` and `visible`. Use `excel_com` for protected corporate workbooks that require Excel desktop. |
+| `structure` | object | see below | Detection of total/subtotal/banner/section rows inside the data. See `sources[].structure` below. |
 | `columns` | array | — | The mapping; see below. |
 | `filters` | array | `[]` | Rows deliberately out of scope. |
 | `checks` | array | `[]` | Quality rules. |
@@ -60,12 +63,63 @@ naming the exact path, so a typo costs one line of output rather than a run.
 | `trim` | boolean | `true` | Remove surrounding spaces. |
 | `default` | any | `null` | Used when the cell is empty. |
 | `date_formats` | array | `[]` | Extra `strptime` patterns tried first, e.g. `["%d/%m/%Y"]`. |
+| `scale` | integer | `12` | `number` columns only. Decimal places kept exactly; a value needing more is quarantined rather than rounded. |
+| `aliases` | array | `[]` | Other header texts this column is known by, e.g. `["Total Amount", "Net Amount"]`. An alias match is treated the same as an exact match - never a guess, never a warning. |
 | `notes` | string | `""` | Free text. |
 
 Values the parser already understands without help: `1,234.50`, `1 234`,
 `(50)` as negative, trailing-minus `12-`, Arabic decimal `12٫5`, the usual date
 orders, `Yes`/`No`/`نعم`/`لا`, and an Excel serial number that lost its format.
 A percentage such as `15%` is deliberately refused rather than guessed.
+
+## Header and column resolution
+
+A header exactly where `header_row` says, with column names exactly matching
+`columns[].source`, resolves silently and is never mentioned again. Anything
+short of that is absorbed when it safely can be, and always named on the
+dashboard's controls table so nothing is silent:
+
+- **Header moved** (a banner or title row added above it) - found automatically
+  within `header_search_rows` rows, reported as `header_location`, run stays
+  at `WARNING`.
+- **Column renamed, reordered, translated, or given a unit suffix** - resolved
+  through a ladder of increasingly permissive rules (exact, alias, normalised
+  case/punctuation/digit-forms, fuzzy similarity, and opt-in position), reported
+  as `column_mapping`, run stays at `WARNING`. A genuinely different-looking
+  name (`Amount` vs `Total Amount`) is deliberately **not** guessed - declare it
+  as an `aliases` entry once the business owner confirms it means the same
+  thing, and it resolves silently from then on.
+- **Two files' headers, or two possible matches, tie exactly** - refused
+  outright rather than picked arbitrarily; the run `BLOCK`s with the tied
+  candidates named.
+- **Nothing in the file matches any configured column at all** - no guess is
+  made; the run `BLOCK`s with the ordinary missing-column message.
+
+Run `PROJECT_TOOL doctor --project projects/<Name> --probe <folder-with-a-sample-file>`
+to see exactly how a representative file would be read - sheet, header row,
+every column's resolution and rung, and how its rows classify - without
+processing anything.
+
+## `sources[].structure`
+
+Total lines, subtotal lines, title banners and section labels sit in the same
+columns as real rows, so a reader that trusts the rectangle counts them as
+data. This block controls how they are told apart; see `docs/AUTOMATION_FLOW.md`
+for the full classification rules.
+
+| Key | Type | Default | Meaning |
+|---|---|---|---|
+| `detect_total_rows` | boolean | `true` | Set `false` only for a source that is proven never to contain one. |
+| `total_label_fields` | array | all text columns | Which columns' text is checked against the total-label lexicon (`Total`, `Subtotal`, `الإجمالي`, ...). |
+| `extra_total_labels` | array | `[]` | Project-specific words to add to that lexicon. |
+| `verify_totals_against_data` | boolean | `true` | Compare a detected total against the rows it covers. |
+| `on_total_mismatch` | string | `block` | `block` (safest) or `warn` when a stated total disagrees with its rows. |
+| `capture_section_headers_into` | string or null | `null` | A mapped text column to fill with the last section label seen above each row. |
+| `stop_after_blank_rows` | integer | `0` | `0` reads the whole sheet; a positive number ends the data block after that many consecutive blank rows. |
+
+Every excluded row - total, banner, section or malformed - keeps its Excel
+row number and original values in the `excluded_rows` table and is never
+silently dropped.
 
 ## What each layer creates in the database
 

@@ -20,9 +20,9 @@ import sys
 import unittest
 
 from engine import __version__, config as config_module, paths, pipeline
-from engine.data import cube, metrics
+from engine.data import cube, metrics, resolve, structure
 from engine.db import database
-from engine.excel import com_reader
+from engine.excel import com_reader, csv_reader, discovery, layout, xlsx_reader
 from engine.sync import sql_server
 from engine.errors import UserError
 from engine.logging_setup import configure
@@ -131,8 +131,124 @@ def command_doctor(args) -> int:
         print(f"NOTE   {note}")
     for problem in problems:
         print(f"BLOCK  {problem}")
+
+    if getattr(args, "probe", None):
+        print()
+        _run_probe(config, args.probe)
+
     print("RESULT: PASS" if not problems else "RESULT: FAIL")
     return 0 if not problems else 1
+
+
+def _run_probe(config: config_module.ProjectConfig, probe_dir: str) -> None:
+    """Show how a representative file would be read, before any row is merged.
+
+    Read-only: nothing here copies a file, opens the warehouse, or writes
+    anything. It answers exactly the questions an adaptation agent - or an
+    operator wondering why a file drifted - needs before trusting a run:
+    which sheet and header row were chosen, how every mapped column resolved
+    and at which rung, and what the file's rows classify as.
+    """
+
+    probe_dir = os.path.abspath(probe_dir)
+    for source in config.sources:
+        matches = discovery.find_matching(probe_dir, source.match)
+        print(f"probe source '{source.id}' ---------------------------------")
+        if not matches:
+            print(f"  no file in {probe_dir} matches {source.match}")
+            continue
+        for path in matches:
+            _probe_file(source, path)
+
+
+def _probe_file(source, path: str) -> None:
+    name = os.path.basename(path)
+    extraction = source.extraction or {}
+    mode = str(extraction.get("mode", "auto")).lower()
+    ext = os.path.splitext(name)[1].lower()
+    if mode == "excel_com" or ext in {".xls", ".xlsb"}:
+        print(f"  {name}: requires the Excel COM route (protected/legacy workbook); "
+              f"not probed here - see engine/excel/com_reader.py")
+        return
+
+    try:
+        if source.format == "csv":
+            sample = csv_reader.sample_rows(path, delimiter=source.delimiter,
+                                            limit=source.header_search_rows)
+            location = layout.find_header(sample, source, source.header_row,
+                                          source.header_search_rows)
+            if location.values is None:
+                print(f"  {name}: BLOCK  no row in the first {source.header_search_rows} "
+                     f"matches any configured column")
+                return
+            headers, _, _ = csv_reader.inspect(path, delimiter=source.delimiter,
+                                                header_row=location.row_number)
+            row_source = csv_reader.iter_rows(path, delimiter=source.delimiter,
+                                              header_row=location.row_number, strict_width=False)
+        else:
+            sample = list(xlsx_reader.Workbook(path).iter_rows(
+                sheet=source.sheet, max_rows=source.header_search_rows))
+            location = layout.find_header(sample, source, source.header_row,
+                                          source.header_search_rows)
+            if location.values is None:
+                print(f"  {name}: BLOCK  no row in the first {source.header_search_rows} "
+                     f"matches any configured column")
+                return
+            headers = xlsx_reader.inspect(path, sheet=source.sheet, header_row=location.row_number)
+            row_source = xlsx_reader.iter_data_rows(path, sheet=source.sheet,
+                                                     header_row=location.row_number)
+    except UserError as exc:
+        print(f"  {name}: BLOCK  {exc.code}: {exc.what_happened}")
+        return
+
+    print(f"  {name}")
+    header_note = (f"row {location.row_number}" if not location.moved else
+                  f"row {location.row_number} (configured row {source.header_row} did not "
+                  f"look like the header)")
+    print(f"    header      : {header_note}")
+
+    result = resolve.resolve(source, headers)
+    for column in result.resolutions:
+        if not column.resolved:
+            flag = "MISSING (required)" if column.required else "missing (optional)"
+            print(f"    column      : '{column.source_label}' -> {flag}")
+        else:
+            print(f"    column      : {column.describe()}")
+    if result.ambiguous:
+        for item in result.ambiguous:
+            print(f"    AMBIGUOUS   : '{item.column}' matches {item.candidates} at "
+                 f"the {item.rung} rung")
+
+    positions = {column.field: idx for column, idx in
+                ((c, c.header_index) for c in result.resolutions) if idx is not None}
+    classifier = structure.Classifier(source)
+    field_names = [c.field for c in source.columns]
+    seen = 0
+    for row_number, values in row_source:
+        if classifier.should_stop(row_number):
+            break
+        seen += 1
+        mapped = {field: (values[positions[field]]
+                          if field in positions and positions[field] < len(values) else None)
+                 for field in field_names}
+        classifier.classify(row_number, mapped)
+
+    print(f"    rows        : {seen} seen -> "
+         f"{classifier.counts.get(structure.DATA, 0)} data" +
+         "".join(f" + {count} {structure.CLASS_TITLES.get(kind, kind).lower()}"
+                for kind, count in sorted(classifier.counts.items()) if kind != structure.DATA))
+    if classifier.declared_totals:
+        unverified = structure.unverified_totals(classifier.declared_totals)
+        state = "all verified" if not unverified else f"{len(unverified)} DISAGREE with their rows"
+        print(f"    totals      : {len(classifier.declared_totals)} total line(s) found, {state}")
+    if classifier.suspicions:
+        print(f"    NOTE        : {len(classifier.suspicions)} row(s) mention 'total' but "
+             f"were kept as data (see rows_that_may_be_totals when this file actually runs)")
+    if seen:
+        low, high = int(seen * 0.8), int(seen * 1.2)
+        print(f"    volume      : this sample had {seen} row(s); if daily volume is normally "
+             f"similar, consider expected_rows_min ~{low} / expected_rows_max ~{high} once that "
+             f"gate is available, to catch a truncated export early")
 
 
 def command_run(args) -> int:
@@ -289,6 +405,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     doctor = sub.add_parser("doctor", help="check a project configuration before running it")
     doctor.add_argument("--project", required=True)
+    doctor.add_argument("--probe",
+                        help="folder with a representative file per source; report the sheet, "
+                             "header row, column resolution and row classification that would "
+                             "be used, without processing anything")
     doctor.set_defaults(func=command_doctor)
 
     run = sub.add_parser("run", help="run the pipeline once")

@@ -1,4 +1,4 @@
-# Project map — V14
+# Project map — V15
 
 Read this map before opening engine files. Read every file you edit and the affected test/contract.
 
@@ -12,14 +12,20 @@ Read this map before opening engine files. Read every file you edit and the affe
 | `projects/example_sales/project.json` | complete working project example |
 | `engine/config.py` | project/source contract validation; edit only for reusable config gap |
 | `engine/pipeline.py` | canonical state machine, transactions, publish order; high-risk shared core |
-| `engine/excel/reader.py` | dependency-free direct `.xlsx` extraction |
+| `engine/excel/xlsx_reader.py` | dependency-free direct `.xlsx` extraction |
+| `engine/excel/csv_reader.py` | streaming CSV/TSV extraction |
+| `engine/excel/layout.py` | header-row auto-location (a moved banner is absorbed, not blocked) |
 | `engine/excel/com_reader.py` | authorized Windows Excel COM block extraction for protected workbooks |
 | `engine/data/staging.py` | source discovery/extraction routing and lineage staging |
-| `engine/data/quality.py` | row/dataset quality and quarantine |
+| `engine/data/resolve.py` | column-name resolution ladder (exact/alias/normalised/fuzzy/positional) |
+| `engine/data/structure.py` | tells a total/subtotal/banner/section row apart from a real data row |
+| `engine/data/clean.py` | row/dataset quality and quarantine |
 | `engine/data/history.py` | APPEND / UPSERT / SNAPSHOT / REPLACE_PERIOD trusted history |
+| `engine/data/reconcile.py` | row accounting, control totals, and the drift checks (`header_location`, `column_mapping`, `source_declared_total_*`) |
 | `engine/data/metrics.py` | deterministic trusted SQL metrics |
 | `engine/data/cube.py` | approved pre-aggregated dashboard analytical data |
 | `engine/data/insights.py` | configured + automatic evidence-backed insights |
+| `engine/data/archive.py` | atomic publication (`data/published/<run_id>/` + a single pointer swap) |
 | `engine/db/database.py` | DuckDB production backend + SQLite dev/test fallback, migrations |
 | `engine/db/migrations/` | reusable database schema |
 | `engine/sync/sql_server.py` | optional post-publication SQL Server synchronization |
@@ -30,9 +36,16 @@ Read this map before opening engine files. Read every file you edit and the affe
 | `engine/webapp/static/app.js` | presentation filters/charts/tables/state UI; no trusted KPI formulas |
 | `engine/packaging/builder.py` | final operator package builder |
 | `engine/packaging/verifier.py` | final ZIP shape, runtime and dependency gate |
-| `engine/cli.py` | `PROJECT_TOOL` commands and doctor readiness checks |
+| `engine/cli.py` | `PROJECT_TOOL` commands, doctor readiness checks, `doctor --probe` dry-run structural probe |
 | `tests/test_v13_features.py` | V13 state/history/insight/sync contract tests |
 | `tests/test_v14_hardening.py` | V14 extraction, decision UX and reliability edge-case proofs |
+| `tests/test_structure.py` | total/subtotal/banner/section row classification, the independent total proof |
+| `tests/test_resolve.py`, `tests/test_column_resolution.py` | the column resolution ladder, unit and end-to-end |
+| `tests/test_layout.py`, `tests/test_header_location.py` | header auto-location, unit and end-to-end |
+| `tests/test_csv_resilience.py` | an over-wide CSV row is quarantined, not fatal |
+| `tests/test_exact_money.py` | money stays an exact Decimal through storage and SQL |
+| `tests/test_publication.py` | the one-commit-point atomic publish |
+| `tests/test_backends.py` | SQLite and DuckDB produce identical trusted numbers |
 | `tests/test_packaging.py` | final ZIP and dependency-gate proofs |
 | `tests/test_pipeline.py` | transaction, publish, rollback proof |
 | `tests/test_analytics.py` | cube/filter reconciliation proof |
