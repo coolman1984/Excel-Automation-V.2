@@ -36,6 +36,18 @@ class Workspace:
         return os.path.join(self.data, "dashboard.html")
 
     @property
+    def published(self) -> str:
+        """One folder per published run. The pointer below decides which is live."""
+
+        return os.path.join(self.data, "published")
+
+    @property
+    def published_pointer(self) -> str:
+        """Written last, in one atomic step: this is what makes a run published."""
+
+        return os.path.join(self.published, "CURRENT")
+
+    @property
     def runs(self) -> str:
         return os.path.join(self.root, "runs")
 
@@ -62,7 +74,8 @@ class Workspace:
         return os.path.join(self.run_dir(run_id), "input_copies")
 
     def ensure(self) -> "Workspace":
-        for path in (self.inbox, self.data, self.runs, self.archive, self.exports, self.logs):
+        for path in (self.inbox, self.data, self.published, self.runs, self.archive,
+                     self.exports, self.logs):
             os.makedirs(path, exist_ok=True)
         return self
 

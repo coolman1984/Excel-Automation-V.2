@@ -21,6 +21,7 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from engine import __version__, automation, pipeline
+from engine.data import archive
 from engine.report import standalone
 from engine.errors import UserError
 from engine.logging_setup import logger
@@ -387,6 +388,9 @@ def make_server(config, workspace, host: str = "127.0.0.1", port: int = 0):
     """Create the loopback server. ``port=0`` lets the machine choose a free one."""
 
     session_key = secrets.token_urlsafe(24)
+    # A crash during a previous run can leave the convenience copies in data/ out of
+    # step with the published result. Put them back before anything reads them.
+    archive.mirror(workspace)
     application = Application(config, workspace, session_key)
     handler = type("BoundHandler", (Handler,), {"app": application})
     server = ThreadingHTTPServer((host, port), handler)

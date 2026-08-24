@@ -245,10 +245,21 @@ def _run_checks(connection, run_id: str, source, table: str) -> tuple[int, int]:
                 f"SELECT {key} FROM {database.quote(table)} GROUP BY {key} HAVING COUNT(*) > 1"
             ).fetchall()
             rows = []
+            kept: dict[tuple, int] = {}
             for duplicate in duplicates:
                 clause = " AND ".join(f"{database.quote(f)} IS ?" for f in fields)
-                rows.extend(_fetch(connection, table, clause, tuple(duplicate)))
-            message = lambda row, f=rule_field: label or f"More than one row has the same {f}."
+                group = sorted(_fetch(connection, table, clause, tuple(duplicate)),
+                               key=lambda row: (row["_file"], row["_row_no"]))
+                # The first occurrence is the record; only the repeats are rejected.
+                # Removing the whole group would delete the legitimate original too.
+                first = group[0]
+                for repeat in group[1:]:
+                    kept[(repeat["_file"], repeat["_row_no"])] = first["_row_no"]
+                    rows.append(repeat)
+            message = lambda row, f=rule_field, k=kept: label or (
+                f"This record repeats the same {f} as row "
+                f"{k.get((row['_file'], row['_row_no']), '?')} of the same file, "
+                f"which was kept.")
         else:  # pragma: no cover - config validation already rejects this
             continue
 

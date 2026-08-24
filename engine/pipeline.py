@@ -328,31 +328,41 @@ def run(config: config_module.ProjectConfig, workspace, progress: ProgressCallba
             connection.execute("ROLLBACK")
             raise
 
-        # Local publication is independent from SQL Server. Both strings are already built and
-        # verified in memory, so neither can expose a half-generated dashboard.
+        # Everything below runs after the trusted transaction has committed, and the
+        # result is published exactly once - see archive.publish for why one commit
+        # point matters when two files have to change together.
         assert document is not None
-        archive.atomic_write(workspace.dashboard, json.dumps(document, ensure_ascii=False,
-                                                             indent=2, default=str))
-        archive.atomic_write(workspace.dashboard_html, html)
-        result.dashboard_published = True
+        keep = int(config.gate("archive_keep_runs", 10))
 
-        # Optional enterprise mirror. A remote outage changes only this status, not the trusted run.
-        sync_result = sql_server.sync(config, connection, run_id)
-        result.enterprise_sync = sync_result.to_dict()
+        # Optional enterprise mirror. It runs before publication so the published
+        # result already carries its outcome, and it can never hold the local result
+        # back: any failure becomes a PENDING status on an otherwise complete run.
+        try:
+            result.enterprise_sync = sql_server.sync(config, connection, run_id).to_dict()
+        except Exception as exc:
+            log.error("[%s] enterprise synchronization failed | %s", run_id, exc)
+            result.enterprise_sync = {
+                "enabled": True, "status": "PENDING", "rows": 0, "tables": [],
+                "message": "Local result is trusted; SQL Server synchronization is pending.",
+                "error": str(exc)}
         document["enterprise_sync"] = result.enterprise_sync
-        # Verification has finished successfully; the persisted report represents a completed run.
+
+        # Verification has finished successfully; the persisted report represents a
+        # completed run, so the state is final before anything is written.
         result.state = "COMPLETE"
         document["run"]["state"] = "COMPLETE"
-        # Rebuild the portable HTML so its status matches the JSON users see in the app.
         html = standalone.build(document, config.display_title())
         standalone.verify(html, document)
-        archive.atomic_write(workspace.dashboard, json.dumps(document, ensure_ascii=False,
-                                                             indent=2, default=str))
-        archive.atomic_write(workspace.dashboard_html, html)
+
+        archive.publish(workspace, run_id, {
+            "dashboard.json": json.dumps(document, ensure_ascii=False, indent=2, default=str),
+            "dashboard.html": html,
+        }, keep=keep)
+        result.dashboard_published = True
 
         archive.snapshot(workspace.archive, run_id,
                          [workspace.dashboard, workspace.dashboard_html, workspace.database],
-                         keep=int(config.gate("archive_keep_runs", 10)))
+                         keep=keep)
         emit(*_step("COMPLETE"))
         _write_events(connection, run_id, events)
         return result
@@ -449,10 +459,13 @@ def _write_events(connection, run_id: str, events) -> None:
 
 
 def last_dashboard(workspace) -> dict | None:
-    if not os.path.isfile(workspace.dashboard):
+    """The published result. The pointer wins; the legacy copy is the fallback."""
+
+    path = archive.published_file(workspace, "dashboard.json")
+    if not os.path.isfile(path):
         return None
     try:
-        with open(workspace.dashboard, "r", encoding="utf-8") as handle:
+        with open(path, "r", encoding="utf-8") as handle:
             return json.load(handle)
     except (OSError, json.JSONDecodeError):
         return None
