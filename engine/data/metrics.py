@@ -12,6 +12,7 @@ import json
 import os
 import re
 
+from engine.data import types
 from engine.errors import user_error
 
 _HEADER_RE = re.compile(r"^\s*--\s*metric\s*:\s*(?P<id>[A-Za-z0-9_]+)\s*$", re.IGNORECASE)
@@ -131,17 +132,19 @@ def compute(connection, definitions: list[MetricDefinition]) -> list[dict]:
             value = None
             if rows:
                 value = rows[0]["value"] if "value" in columns else rows[0][0]
-            payload["value"] = value
+            payload["value"] = types.as_json_number(value)
             payload["evidence"] = {"sql": definition.sql, "rows": len(rows)}
         elif definition.kind == "series":
             payload["points"] = [
-                {"label": _label(row, columns), "value": _value(row, columns),
+                {"label": _label(row, columns),
+                 "value": types.as_json_number(_value(row, columns)),
                  "series": row["series"] if "series" in columns else None}
                 for row in rows]
             payload["evidence"] = {"sql": definition.sql, "rows": len(rows)}
         else:
             payload["columns"] = columns
-            payload["rows"] = [[row[column] for column in columns] for row in rows]
+            payload["rows"] = [[types.as_json_number(row[column]) for column in columns]
+                               for row in rows]
             payload["evidence"] = {"sql": definition.sql, "rows": len(rows)}
         results.append(payload)
     return results

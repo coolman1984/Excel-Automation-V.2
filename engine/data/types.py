@@ -16,6 +16,16 @@ DEFAULT_DATE_FORMATS = [
 ]
 
 
+# Decimal places kept for a ``number`` column. 38 total digits minus 12 fractional
+# leaves 26 for the integer part, which is far beyond any business figure, and 12
+# fractional places cover money, unit prices, rates and percentages. Excel itself
+# carries about 15 significant digits, so a value read from a workbook cannot need
+# more than this.
+DEFAULT_SCALE = 12
+MAX_SCALE = 18
+TOTAL_DIGITS = 38
+
+
 class ParseError(ValueError):
     """The value cannot be understood as the configured type."""
 
@@ -37,8 +47,20 @@ def parse_decimal(text: str) -> Decimal:
     return -value if negative else value
 
 
-def parse_number(text: str) -> float:
-    return float(parse_decimal(text))
+def parse_number(text: str, scale: int = DEFAULT_SCALE) -> Decimal:
+    """A ``number`` stays a :class:`Decimal` all the way to storage.
+
+    It used to become a float here, which meant every trusted total was summed in
+    binary floating point. Rounding a money figure once is invisible; summing a
+    million of them is not, and the drift landed in the published KPI.
+    """
+
+    value = parse_decimal(text)
+    places = -value.as_tuple().exponent
+    if places > scale:
+        raise ParseError(
+            f"'{text}' has {places} decimal places, more than the {scale} this column keeps")
+    return value
 
 
 def parse_integer(text: str) -> int:
@@ -83,7 +105,39 @@ def parse_datetime(text: str, formats: list[str] | None = None) -> _dt.datetime:
     return _dt.datetime.combine(parse_date(value, formats), _dt.time())
 
 
-def parse(value: str | None, kind: str, formats: list[str] | None = None) -> object:
+def as_json_number(value: object) -> object:
+    """Convert an exact value for the dashboard contract.
+
+    This is the one place a trusted figure becomes a JSON number. Every browser
+    parses JSON numbers as doubles, so the conversion has to happen somewhere; it
+    happens here, once, on a figure that has already been aggregated and verified -
+    never before the arithmetic.
+    """
+
+    if isinstance(value, Decimal):
+        if value == value.to_integral_value():
+            return int(value)
+        return float(value)
+    return value
+
+
+def same_number(left: object, right: object) -> bool:
+    """Compare a parsed value against a value written in the configuration.
+
+    ``Decimal("0.1") == 0.1`` is False, because the float is not exactly a tenth.
+    Configured thresholds are decimal literals, so they are read as decimals.
+    """
+
+    if isinstance(left, Decimal) or isinstance(right, Decimal):
+        try:
+            return Decimal(str(left)) == Decimal(str(right))
+        except (InvalidOperation, ValueError):
+            return False
+    return left == right
+
+
+def parse(value: str | None, kind: str, formats: list[str] | None = None,
+          scale: int = DEFAULT_SCALE) -> object:
     """Parse ``value`` into ``kind``. ``None``/empty stays ``None``."""
 
     if value is None or str(value).strip() == "":
@@ -91,7 +145,7 @@ def parse(value: str | None, kind: str, formats: list[str] | None = None) -> obj
     if kind == "text":
         return str(value)
     if kind == "number":
-        return parse_number(value)
+        return parse_number(value, scale)
     if kind == "integer":
         return parse_integer(value)
     if kind == "boolean":

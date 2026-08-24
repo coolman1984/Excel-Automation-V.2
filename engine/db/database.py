@@ -12,13 +12,16 @@ from __future__ import annotations
 import datetime as _dt
 import os
 import sqlite3
+from decimal import Decimal
 from collections.abc import Iterable, Iterator, Sequence
 from typing import Any
 
+from engine.data import types
 from engine.logging_setup import logger
 
 MIGRATIONS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "migrations")
 
+# Kept for callers that only need the storage class, not the exact declaration.
 SQL_TYPE = {
     "text": "TEXT",
     "number": "DOUBLE",
@@ -27,6 +30,26 @@ SQL_TYPE = {
     "datetime": "TEXT",
     "boolean": "BOOLEAN",
 }
+
+
+def sql_type(backend: str, kind: str, scale: int = types.DEFAULT_SCALE) -> str:
+    """The column declaration for a mapped field on this backend.
+
+    DuckDB gets a real DECIMAL, so ``SUM(amount)`` in project SQL is exact. SQLite
+    has no decimal type, so the development fallback stores DOUBLE and its SQL sums
+    are approximate - see the note on the adapter below. Reconciliation stays exact
+    on both, because it reads the staged text and adds in Decimal.
+    """
+
+    if kind == "number" and backend == "duckdb":
+        return f"DECIMAL({types.TOTAL_DIGITS}, {int(scale)})"
+    return SQL_TYPE[kind]
+
+
+# SQLite cannot store a decimal. Binding one has to lose exactness somewhere, and
+# this is that somewhere: it is explicit rather than hidden inside the driver, so
+# the development fallback's limit is visible in the code that causes it.
+sqlite3.register_adapter(Decimal, float)
 
 
 class Row(dict):

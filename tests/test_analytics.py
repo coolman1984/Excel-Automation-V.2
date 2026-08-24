@@ -145,7 +145,10 @@ class CubeArithmeticTest(unittest.TestCase):
             f'SELECT SUM(amount) AS revenue, COUNT(*) AS lines FROM '
             f'({cube.fact_sql(self.config, self.spec)}) AS facts WHERE segment = \'Retail\''
         ).fetchone()
-        self.assertAlmostEqual(revenue / lines, row["revenue"] / row["lines"], places=6)
+        # DuckDB returns an exact Decimal for a DECIMAL sum; the cube publishes a
+        # JSON number. Compare them as numbers, not as types.
+        self.assertAlmostEqual(float(revenue) / float(lines),
+                               float(row["revenue"]) / float(row["lines"]), places=6)
 
     # -- the guard rails ---------------------------------------------------
     def test_the_run_proves_the_cube_against_a_second_pass(self) -> None:

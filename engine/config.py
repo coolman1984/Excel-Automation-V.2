@@ -16,7 +16,7 @@ import json
 import os
 from typing import Any
 
-from engine.data import structure
+from engine.data import structure, types
 from engine.errors import user_error
 
 FIELD_TYPES = {"text", "number", "integer", "date", "datetime", "boolean"}
@@ -29,7 +29,8 @@ _SOURCE_KEYS = {
     "columns", "checks", "control_totals", "filters", "notes", "extraction",
     "update_mode", "period_field", "structure",
 }
-_COLUMN_KEYS = {"source", "field", "type", "required", "trim", "default", "date_formats", "notes"}
+_COLUMN_KEYS = {"source", "field", "type", "required", "trim", "default", "date_formats",
+                "notes", "scale"}
 _ROOT_KEYS = {
     "project_name", "title", "language", "approval", "business", "sources",
     "relationships", "metrics_sql", "dashboard", "analytics", "insights", "quality_gates",
@@ -47,6 +48,7 @@ class Column:
     default: Any = None
     date_formats: list[str] = dataclasses.field(default_factory=list)
     notes: str = ""
+    scale: int = types.DEFAULT_SCALE
 
 
 @dataclasses.dataclass
@@ -158,12 +160,20 @@ def _parse_column(where: str, data: dict) -> Column:
     if not field.replace("_", "").isalnum():
         _fail(where, f"field '{field}' must be letters, digits and underscores only",
               "Rename the field; it becomes a database column name.")
+    scale = int(data.get("scale", types.DEFAULT_SCALE))
+    if not 0 <= scale <= types.MAX_SCALE:
+        _fail(where, f"scale {scale} is outside 0..{types.MAX_SCALE}",
+              f"Use a scale between 0 and {types.MAX_SCALE} decimal places.")
+    if "scale" in data and kind != "number":
+        _fail(where, f"scale applies to 'number' columns, not '{kind}'",
+              "Remove 'scale', or change the column type to number.")
     return Column(source=source, field=field, type=kind,
                   required=bool(data.get("required", False)),
                   trim=bool(data.get("trim", True)),
                   default=data.get("default"),
                   date_formats=list(data.get("date_formats", [])),
-                  notes=str(data.get("notes", "")))
+                  notes=str(data.get("notes", "")),
+                  scale=scale)
 
 
 def _parse_source(index: int, data: dict) -> Source:

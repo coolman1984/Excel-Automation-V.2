@@ -69,7 +69,8 @@ def clean(connection, run_id: str, source) -> CleanResult:
     database.drop_table(connection, target)
     database.create_table(
         connection, target,
-        LINEAGE_COLUMNS + [(c.field, database.SQL_TYPE[c.type]) for c in source.columns])
+        LINEAGE_COLUMNS + [(c.field, database.sql_type(connection.backend, c.type, c.scale))
+                           for c in source.columns])
     columns = [c[0] for c in LINEAGE_COLUMNS] + [c.field for c in source.columns]
 
     staged = connection.execute(f"SELECT * FROM {database.quote(stage_table(source.id))}").fetchall()
@@ -88,7 +89,7 @@ def clean(connection, run_id: str, source) -> CleanResult:
             if (text is None or str(text).strip() == "") and column.default is not None:
                 text = str(column.default)
             try:
-                value = types.parse(text, column.type, column.date_formats)
+                value = types.parse(text, column.type, column.date_formats, column.scale)
             except types.ParseError as exc:
                 failure = (column.field, str(exc))
                 break
@@ -148,11 +149,15 @@ def _filter_reason(source, values: dict) -> str:
         value = values.get(field)
         operator = rule.get("operator", "equals")
         target = rule.get("value")
+        # Configured thresholds are decimal literals, so numbers are compared as
+        # decimals: Decimal("0.1") != 0.1 would silently invert a filter.
         excluded = (
-            (operator == "equals" and value != target)
-            or (operator == "not_equals" and value == target)
-            or (operator == "in" and value not in (target or []))
-            or (operator == "not_in" and value in (target or []))
+            (operator == "equals" and not types.same_number(value, target))
+            or (operator == "not_equals" and types.same_number(value, target))
+            or (operator == "in"
+                and not any(types.same_number(value, item) for item in (target or [])))
+            or (operator == "not_in"
+                and any(types.same_number(value, item) for item in (target or [])))
             or (operator == "not_null" and value is None)
         )
         if excluded:

@@ -53,7 +53,8 @@ def ensure(connection, source) -> None:
     table = history_table(source.id)
     database.create_table(
         connection, table,
-        HISTORY_COLUMNS + [(c.field, database.SQL_TYPE[c.type]) for c in source.columns],
+        HISTORY_COLUMNS + [(c.field, database.sql_type(connection.backend, c.type, c.scale))
+                           for c in source.columns],
         primary_key=["_bk"])
     fields = ", ".join(database.quote(c.field) for c in source.columns)
     connection.execute(f"DROP VIEW IF EXISTS {database.quote(view_name(source.id))}")
