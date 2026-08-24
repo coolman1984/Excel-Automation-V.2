@@ -51,31 +51,63 @@ def find_matching(inbox: str, patterns: list[str]) -> list[str]:
     return found
 
 
-def _stable_stat(path: str, checks: int = 2, delay: float = 0.08):
-    """Require unchanged size/mtime across consecutive probes.
+def _default_settle_seconds() -> float:
+    # Production wants a real window (a slow network copy can pause between write
+    # batches for well over a second); the test suite processes hundreds of
+    # already-complete static fixtures and would otherwise pay this on every one.
+    # Same override pattern as UEA_DB_BACKEND.
+    try:
+        return float(os.environ.get("UEA_FILE_SETTLE_SECONDS", "1.0"))
+    except ValueError:
+        return 1.0
 
-    The short delay keeps manual runs responsive while catching the common
-    watched-folder race where a large file is still being copied.  The source
-    is checked again after copying, so this is defense in depth rather than a
-    single timing assumption.
+
+def _stable_stat(path: str, min_settle_seconds: float | None = None, poll_interval: float = 0.1,
+                 max_wait_seconds: float = 30.0):
+    """Require unchanged size/mtime for a real elapsed window, not just two probes.
+
+    A slow network copy can easily pause between write batches for longer than a
+    couple of probes 80ms apart, which used to be enough to look "stable" while
+    genuinely mid-transfer. This instead requires the signature to hold for
+    ``min_settle_seconds`` of continuous polling; any change resets the clock. A
+    file still growing after ``max_wait_seconds`` is reported clearly rather than
+    accepted on a technicality or hung on forever.
+
+    This still cannot detect a transfer that aborted and left a permanently
+    truncated file with no further writes - no stability window can, since a
+    stopped-changing truncated file and a stopped-changing complete file look
+    identical from the outside. That case surfaces instead when the file fails to
+    open as a valid workbook, downstream.
     """
+    min_settle_seconds = _default_settle_seconds() if min_settle_seconds is None else min_settle_seconds
+    poll_interval = min(poll_interval, max(0.001, min_settle_seconds / 4)) if min_settle_seconds else poll_interval
+    start = time.monotonic()
     previous = None
-    for _ in range(max(2, checks)):
+    settled_since: float | None = None
+    while True:
         try:
             current = os.stat(path)
         except OSError as exc:
             raise user_error("E-IN-004", next_action="Make sure the file is fully copied and accessible, then process again.",
                              detail=f"{path}: {exc}") from exc
-        signature = (current.st_size, current.st_mtime_ns)
         if current.st_size <= 0:
             raise user_error("E-IN-004", what_happened="An input file is empty.",
                              next_action="Replace the empty file with the completed export and process again.",
                              detail=path)
-        if previous is not None and signature == previous:
+        signature = (current.st_size, current.st_mtime_ns)
+        now = time.monotonic()
+        if signature != previous:
+            previous = signature
+            settled_since = now
+        elif now - settled_since >= min_settle_seconds:
             return current
-        previous = signature
-        time.sleep(delay)
-    return os.stat(path)
+        if now - start >= max_wait_seconds:
+            raise user_error(
+                "E-IN-004",
+                what_happened="An input file is still being written and did not finish in time.",
+                next_action="Wait for the file copy or export to finish, then process again.",
+                detail=f"{path}: still changing after {max_wait_seconds:.0f}s")
+        time.sleep(poll_interval)
 
 
 def collect(source_id: str, inbox: str, patterns: list[str], workspace: str,

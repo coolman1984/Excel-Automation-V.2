@@ -10,6 +10,7 @@ import tempfile
 
 os.environ.setdefault("APP_LOG_QUIET", "1")   # tests keep the console readable
 os.environ.setdefault("UEA_DB_BACKEND", "sqlite")  # deterministic source tests; production can require DuckDB
+os.environ.setdefault("UEA_FILE_SETTLE_SECONDS", "0.01")  # fixtures are static; production waits longer
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if REPO_ROOT not in sys.path:

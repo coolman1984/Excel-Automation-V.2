@@ -59,6 +59,16 @@ class Workspace:
     def exports(self) -> str:
         return os.path.join(self.root, "exports")
 
+    @property
+    def watcher_state(self) -> str:
+        """Where the watcher remembers which files it has already handed off,
+        so a restart does not forget and re-copy everything in the watched
+        folder. The processed-file ledger, not this file, is what actually
+        stops reprocessed content from being merged twice - this only affects
+        whether a file is retried, not whether it could be double-counted."""
+
+        return os.path.join(self.data, "watcher_seen.json")
+
     def processed_archive(self, folder_name: str = "Processed") -> str:
         """Where a successfully processed inbox file goes, organised by month,
         so the inbox holds only what has not been processed yet while every
