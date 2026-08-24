@@ -104,5 +104,66 @@ class ConfigTest(unittest.TestCase):
         self.assertIn("sources", data)
 
 
+class AutomationConfigTest(unittest.TestCase):
+    """C8: a typo here used to be silently swallowed - the watcher just
+    looked permanently disabled, with nothing telling the operator why."""
+
+    def setUp(self) -> None:
+        self.cleanup: list[str] = []
+
+    def tearDown(self) -> None:
+        remove_all(self.cleanup)
+
+    def _load_broken(self, mutate) -> UserError:
+        project = project_copy(self.cleanup)
+        edit_config(project, mutate)
+        with self.assertRaises(UserError) as caught:
+            config_module.load(project)
+        return caught.exception
+
+    def test_no_automation_section_means_disabled(self) -> None:
+        config = config_module.load(EXAMPLE_PROJECT)
+        self.assertEqual(config.automation,
+                         {"watch_folder": "", "process_on_start": False,
+                          "check_every_minutes": 10.0, "enabled": False})
+
+    def test_misspelled_key_is_rejected_not_silently_ignored(self) -> None:
+        error = self._load_broken(
+            lambda data: data.update({"automation": {"check_every_minute": 5}}))
+        self.assertEqual(error.code, "E-CFG-004")
+        self.assertIn("check_every_minute", error.detail)
+
+    def test_watch_folder_must_be_text(self) -> None:
+        error = self._load_broken(
+            lambda data: data.update({"automation": {"watch_folder": 123}}))
+        self.assertIn("watch_folder", error.detail)
+
+    def test_process_on_start_must_be_boolean(self) -> None:
+        error = self._load_broken(
+            lambda data: data.update({"automation": {"process_on_start": "yes"}}))
+        self.assertIn("process_on_start", error.detail)
+
+    def test_check_every_minutes_must_be_a_number(self) -> None:
+        error = self._load_broken(
+            lambda data: data.update({"automation": {"check_every_minutes": "often"}}))
+        self.assertIn("check_every_minutes", error.detail)
+
+    def test_check_every_minutes_must_be_positive(self) -> None:
+        error = self._load_broken(
+            lambda data: data.update({"automation": {"check_every_minutes": 0}}))
+        self.assertIn("check_every_minutes", error.detail)
+
+    def test_a_valid_automation_section_is_accepted(self) -> None:
+        project = project_copy(self.cleanup)
+        edit_config(project, lambda data: data.update({"automation": {
+            "watch_folder": "C:\\Reports\\Incoming", "check_every_minutes": 2.5,
+            "process_on_start": True}}))
+        config = config_module.load(project)
+        self.assertEqual(config.automation["watch_folder"], "C:\\Reports\\Incoming")
+        self.assertEqual(config.automation["check_every_minutes"], 2.5)
+        self.assertTrue(config.automation["process_on_start"])
+        self.assertTrue(config.automation["enabled"])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -40,6 +40,9 @@ _ROOT_KEYS = {
 _INBOX_KEYS = {"after_run", "archive_folder", "archive_keep_days", "reprocess_identical"}
 _INBOX_AFTER_RUN = {"archive", "keep", "delete"}
 
+_AUTOMATION_KEYS = {"watch_folder", "process_on_start", "check_every_minutes"}
+_AUTOMATION_DEFAULT_INTERVAL_MINUTES = 10
+
 
 @dataclasses.dataclass
 class Column:
@@ -109,6 +112,7 @@ class ProjectConfig:
     sql_server: dict = dataclasses.field(default_factory=dict)
     database: dict = dataclasses.field(default_factory=dict)
     inbox: dict = dataclasses.field(default_factory=dict)
+    automation: dict = dataclasses.field(default_factory=dict)
 
     # -- helpers -----------------------------------------------------------
     def source(self, source_id: str) -> Source:
@@ -392,6 +396,32 @@ def load(path: str) -> ProjectConfig:
         "reprocess_identical": bool(inbox_raw.get("reprocess_identical", False)),
     }
 
+    automation_raw = dict(data.get("automation") or {})
+    _check_unknown("automation", automation_raw, _AUTOMATION_KEYS)
+    watch_folder = automation_raw.get("watch_folder", "")
+    if not isinstance(watch_folder, str):
+        _fail("automation", f"'watch_folder' must be text, found {type(watch_folder).__name__}",
+              "Set watch_folder to a folder path, e.g. \"C:\\\\Reports\\\\Incoming\".")
+    process_on_start = automation_raw.get("process_on_start", False)
+    if not isinstance(process_on_start, bool):
+        _fail("automation",
+              f"'process_on_start' must be true or false, found {type(process_on_start).__name__}",
+              "Set process_on_start to true or false.")
+    check_every_minutes = automation_raw.get("check_every_minutes", _AUTOMATION_DEFAULT_INTERVAL_MINUTES)
+    if not isinstance(check_every_minutes, (int, float)) or isinstance(check_every_minutes, bool):
+        _fail("automation",
+              f"'check_every_minutes' must be a number, found {type(check_every_minutes).__name__}",
+              "Set check_every_minutes to how often to check the watched folder, e.g. 10.")
+    if check_every_minutes <= 0:
+        _fail("automation", "check_every_minutes must be greater than 0",
+              "Use a positive number of minutes between checks.")
+    automation = {
+        "watch_folder": watch_folder,
+        "process_on_start": process_on_start,
+        "check_every_minutes": float(check_every_minutes),
+        "enabled": bool(watch_folder or process_on_start),
+    }
+
     return ProjectConfig(
         project_name=project_name,
         root=os.path.dirname(os.path.abspath(path)),
@@ -409,6 +439,7 @@ def load(path: str) -> ProjectConfig:
         sql_server=dict(data.get("sql_server", {})),
         database=dict(data.get("database", {})),
         inbox=inbox,
+        automation=automation,
     )
 
 

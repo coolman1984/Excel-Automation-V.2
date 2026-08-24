@@ -37,17 +37,17 @@ from engine.data import archive
 from engine.excel.discovery import hash_file
 from engine.logging_setup import logger
 
-DEFAULT_INTERVAL_MINUTES = 10
-
 
 def settings(config) -> dict:
-    raw = config.raw.get("automation") or {}
-    return {
-        "watch_folder": raw.get("watch_folder", ""),
-        "process_on_start": bool(raw.get("process_on_start", False)),
-        "check_every_minutes": float(raw.get("check_every_minutes", DEFAULT_INTERVAL_MINUTES)),
-        "enabled": bool(raw.get("watch_folder") or raw.get("process_on_start")),
-    }
+    """The ``automation`` section, already validated by :mod:`engine.config`.
+
+    Validation lives in config.load() - not here - so a typo like
+    ``check_every_minute`` fails loudly at load time with the exact setting
+    name, instead of silently falling back to a default and leaving the
+    watcher looking disabled with no explanation.
+    """
+
+    return dict(config.automation)
 
 
 def matching_patterns(config) -> list[str]:
