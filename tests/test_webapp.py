@@ -103,6 +103,18 @@ class WebAppTest(unittest.TestCase):
         self.assertEqual({item["name"] for item in uploaded["inbox"]},
                          {"sales_2026Q1.xlsx", "customers.xlsx"})
 
+        # Removing an uploaded file before it is ever processed is the ordinary
+        # "I picked the wrong file" flow; re-add it so processing below is not
+        # left one source short. A file's removability after a successful run
+        # depends on inbox.after_run (archive by default moves it out), which
+        # is covered in tests/test_publication.py, not here.
+        removed = self.call("/api/files/remove", {"name": "customers.xlsx"})
+        self.assertTrue(removed["removed"])
+        with open(os.path.join(FIXTURES, "customers.xlsx"), "rb") as handle:
+            self.call("/api/files", {"files": [{"name": "customers.xlsx",
+                                                "content_base64": base64.b64encode(
+                                                    handle.read()).decode()}]})
+
         self.assertTrue(self.call("/api/process", {})["started"])
         for _ in range(120):
             progress = self.call("/api/progress")
@@ -126,9 +138,6 @@ class WebAppTest(unittest.TestCase):
                 f"{self.base}/api/export/top_customers.csv?k={self.key}", timeout=10) as response:
             self.assertIn("attachment", response.headers["Content-Disposition"])
             self.assertIn("Customer", response.read().decode("utf-8-sig").splitlines()[0])
-
-        removed = self.call("/api/files/remove", {"name": "customers.xlsx"})
-        self.assertTrue(removed["removed"])
 
     def test_unknown_endpoint_is_a_clean_404(self) -> None:
         with self.assertRaises(urllib.error.HTTPError) as caught:

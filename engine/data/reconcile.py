@@ -254,6 +254,14 @@ def relationships(connection, config, run_id: str) -> list[Check]:
         on_missing = relationship.get("on_missing", "warn")
         if not child_fields:
             continue
+        # A source that has never been active (no file ever supplied, and not
+        # required) has no clean table at all yet, not merely an empty one -
+        # clean.clean() is what creates it, and clean.clean() is never called
+        # for a source with nothing new to process. There is nothing to check
+        # a relationship against yet, so this is not a failure.
+        if not (database.table_exists(connection, clean_table(child.id))
+               and database.table_exists(connection, clean_table(parent.id))):
+            continue
         join = " AND ".join(
             database.null_safe_eq(connection, f"c.{database.quote(cf)}",
                                   f"p.{database.quote(pf)}")

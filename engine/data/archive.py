@@ -6,6 +6,7 @@ so a bad run can never leave the business without its last approved numbers.
 
 from __future__ import annotations
 
+import datetime as _dt
 import os
 import shutil
 import time
@@ -46,6 +47,48 @@ def restore(archive_dir: str, run_id: str, destination: str) -> list[str]:
         shutil.copy2(os.path.join(source, name), os.path.join(destination, name))
         restored.append(name)
     return restored
+
+
+def archive_inbox_file(workspace, folder_name: str, original_path: str, file_name: str,
+                       now: object = None) -> str:
+    """Move a successfully processed inbox file into Processed/<YYYY-MM>/.
+
+    A name collision (two different runs producing a same-named file within
+    the same month) is resolved with a time suffix rather than overwriting -
+    both files stay recoverable.
+    """
+
+    moment = now or _dt.datetime.now()
+    month_dir = os.path.join(workspace.processed_archive(folder_name), moment.strftime("%Y-%m"))
+    os.makedirs(month_dir, exist_ok=True)
+    target = os.path.join(month_dir, file_name)
+    if os.path.exists(target):
+        stem, ext = os.path.splitext(file_name)
+        target = os.path.join(month_dir, f"{stem}.{moment.strftime('%H%M%S')}{ext}")
+    shutil.move(original_path, target)
+    return target
+
+
+def prune_processed_archive(workspace, folder_name: str, keep_days: int) -> list[str]:
+    """Delete archived inbox files older than ``keep_days``. ``0`` keeps them forever."""
+
+    if keep_days <= 0 or not os.path.isdir(workspace.processed_archive(folder_name)):
+        return []
+    root = workspace.processed_archive(folder_name)
+    cutoff = time.time() - keep_days * 86400
+    removed: list[str] = []
+    for month_name in sorted(os.listdir(root)):
+        month_dir = os.path.join(root, month_name)
+        if not os.path.isdir(month_dir):
+            continue
+        for name in os.listdir(month_dir):
+            path = os.path.join(month_dir, name)
+            if os.path.isfile(path) and os.path.getmtime(path) < cutoff:
+                os.remove(path)
+                removed.append(path)
+        if not os.listdir(month_dir):
+            os.rmdir(month_dir)
+    return removed
 
 
 def latest(archive_dir: str) -> str | None:

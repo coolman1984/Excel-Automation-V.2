@@ -59,6 +59,13 @@ class Workspace:
     def exports(self) -> str:
         return os.path.join(self.root, "exports")
 
+    def processed_archive(self, folder_name: str = "Processed") -> str:
+        """Where a successfully processed inbox file goes, organised by month,
+        so the inbox holds only what has not been processed yet while every
+        source file the operator dropped in stays easy to find."""
+
+        return os.path.join(self.root, folder_name)
+
     @property
     def logs(self) -> str:
         return os.path.join(self.root, "logs")

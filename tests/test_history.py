@@ -49,6 +49,16 @@ class HistoryTest(unittest.TestCase):
             connection.close()
 
     def test_identical_rerun_creates_no_duplicates(self) -> None:
+        """The stronger, current form of this proof: the identical file is not
+        merely re-merged into an unchanged result (the old UPSERT-idempotency
+        story) - the processed-file ledger recognises the unchanged content and
+        skips the source entirely on the second run, so history is not touched
+        at all rather than touched and found to already match."""
+
+        def keep_the_file(data):
+            data["inbox"] = {"after_run": "keep"}
+
+        edit_config(self.project, keep_the_file)
         self.write_sales([sales_row("INV-1", 100.0), sales_row("INV-2", 250.0)])
         first = self.run_once()
         second = self.run_once()
@@ -56,8 +66,8 @@ class HistoryTest(unittest.TestCase):
         self.assertEqual(second.status, "PASS", second.message)
         self.assertEqual(len(self.history_rows()), 2)
         sales = [s for s in second.sources if s["source_id"] == "sales"][0]
+        self.assertTrue(sales["skipped"])
         self.assertEqual(sales["new_records"], 0)
-        self.assertEqual(sales["unchanged_records"], 2)
 
     def test_late_correction_updates_the_same_record(self) -> None:
         self.write_sales([sales_row("INV-1", 100.0)])

@@ -18,7 +18,7 @@ import traceback
 from typing import Callable
 
 from engine import __version__, config as config_module
-from engine.data import archive, clean, cube, history, insights, metrics, reconcile, staging
+from engine.data import archive, clean, cube, history, insights, ledger, metrics, reconcile, staging
 from engine.db import database
 from engine.errors import UserError, user_error
 from engine.excel import discovery
@@ -133,6 +133,15 @@ def run(config: config_module.ProjectConfig, workspace, progress: ProgressCallba
     html = ""
     try:
         database.migrate(connection)
+        # The trusted v_<source> view is a public contract: project-authored metrics
+        # and fact SQL reads it unconditionally, with no way to check first. It must
+        # exist even for a source that has never once had data - required=false and
+        # no file yet, or a source skipped this run because nothing is new - so this
+        # runs for every configured source regardless of whether it is active this
+        # run. It only touches schema (CREATE TABLE IF NOT EXISTS, DROP/CREATE VIEW),
+        # never data, so doing this unconditionally is cheap and safe.
+        for source in config.sources:
+            history.ensure(connection, source)
         if require_approval and not config.is_approved:
             pending = config_module.pending_approvals(config)
             raise user_error(
@@ -153,12 +162,34 @@ def run(config: config_module.ProjectConfig, workspace, progress: ProgressCallba
             source_summaries: list[dict] = []
 
             emit(*_step("DETECTED"))
-            discovered: dict[str, list] = {}
+            discovered: dict[str, list] = {}      # every file actually processed this run
+            already_seen: dict[str, list] = {}    # matched, but content already processed before
+            active_sources: list = []
             for source in config.sources:
+                # A required source only needs to raise here on the run that would
+                # otherwise start it with no data at all. discovery.collect never
+                # raises for a missing match by itself (required=False always);
+                # once trusted history exists (ledger.has_ever_succeeded), a day
+                # with nothing new - whether the file was archived away after
+                # succeeding before, or genuinely not re-supplied - is a quiet
+                # skip, not a block. Blocking every run over a rarely-changing
+                # master-data file that already succeeded once would defeat the
+                # point of unattended operation.
                 files = discovery.collect(source.id, workspace.inbox, source.match,
-                                          workspace.staging_dir(run_id), required=source.required)
-                discovered[source.id] = files
-                for item in files:
+                                          workspace.staging_dir(run_id), required=False)
+                new_files, seen_before = ledger.split(
+                    connection, source.id, files, config.inbox.get("reprocess_identical", False))
+                discovered[source.id] = new_files
+                already_seen[source.id] = seen_before
+                if new_files:
+                    active_sources.append(source)
+                elif source.required and not ledger.has_ever_succeeded(connection, source.id):
+                    raise user_error(
+                        "E-IN-001",
+                        next_action=f"Add the file for '{source.id}' on the page, then press "
+                                   f"Process again.",
+                        detail=f"inbox={workspace.inbox} patterns={source.match}")
+                for item in new_files:
                     connection.execute(
                         "INSERT OR REPLACE INTO run_files(run_id, source_id, file_name, size_bytes,"
                         " modified_at, sha256) VALUES (?,?,?,?,?,?)",
@@ -169,6 +200,11 @@ def run(config: config_module.ProjectConfig, workspace, progress: ProgressCallba
                                          "sha256": item.sha256, "size_bytes": item.size_bytes,
                                          "modified_at": _dt.datetime.fromtimestamp(item.modified_at).isoformat(timespec="seconds"),
                                          "extraction": (source.extraction or {}).get("mode", "auto")})
+                for item in seen_before:
+                    result.files.append({"source_id": source.id, "file_name": item.file_name,
+                                         "sha256": item.sha256, "size_bytes": item.size_bytes,
+                                         "modified_at": _dt.datetime.fromtimestamp(item.modified_at).isoformat(timespec="seconds"),
+                                         "extraction": "already_processed"})
 
             # Fail before extraction when the private workspace is too full to safely
             # stage, transact and publish. A half-written warehouse is considerably less
@@ -192,7 +228,7 @@ def run(config: config_module.ProjectConfig, workspace, progress: ProgressCallba
             # state because protected Excel may spend time authorizing the workbook before rows flow.
             emit(*_step("EXTRACTING"))
             staged_results: dict[str, staging.StageResult] = {}
-            for source in config.sources:
+            for source in active_sources:
                 staged = staging.stage(connection, run_id, source, discovered[source.id])
                 staged_results[source.id] = staged
                 result.rows_in += staged.rows_read
@@ -200,7 +236,7 @@ def run(config: config_module.ProjectConfig, workspace, progress: ProgressCallba
 
             emit(*_step("VALIDATING"))
             cleaned: dict[str, clean.CleanResult] = {}
-            for source in config.sources:
+            for source in active_sources:
                 outcome = clean.clean(connection, run_id, source)
                 cleaned[source.id] = outcome
                 result.rows_clean += outcome.rows_clean
@@ -221,11 +257,11 @@ def run(config: config_module.ProjectConfig, workspace, progress: ProgressCallba
                     (run_id, source_id, file_name, row_no, rule, field, message, "reject",
                      json.dumps(payload, ensure_ascii=False, default=str)))
 
-            for source in config.sources:
+            for source in active_sources:
                 history_results[source.id] = history.apply(connection, run_id, source,
                                                            quarantine_writer)
 
-            for source in config.sources:
+            for source in active_sources:
                 checks.extend(reconcile.structure_checks(run_id, source,
                                                          staged_results.get(source.id)))
                 checks.extend(reconcile.run(connection, run_id, source, history_results[source.id]))
@@ -234,6 +270,24 @@ def run(config: config_module.ProjectConfig, workspace, progress: ProgressCallba
             result.reconciliation = reconcile.as_dicts(checks)
 
             for source in config.sources:
+                if source.id not in cleaned:
+                    # Nothing new for this source this run: its trusted history is left
+                    # exactly as it was, not merged against zero rows. Calling history.apply
+                    # here would be actively wrong for SNAPSHOT/REPLACE_PERIOD, which close
+                    # every record the run did not touch - an empty run would read as
+                    # "everything just disappeared" and close the whole trusted table.
+                    source_summaries.append({
+                        "source_id": source.id, "title": source.title, "grain": source.grain,
+                        "update_mode": source.update_mode, "files": [],
+                        "rows_in": 0, "rows_clean": 0, "rows_rejected": 0, "rows_filtered": 0,
+                        "rows_excluded": 0, "excluded_by_class": {},
+                        "new_records": 0, "corrected_records": 0, "unchanged_records": 0,
+                        "closed_records": 0, "skipped": True,
+                        "skip_reason": (f"{len(already_seen.get(source.id, []))} file(s) matched "
+                                       f"but their content was already processed" if
+                                       already_seen.get(source.id) else "no file this run"),
+                    })
+                    continue
                 outcome = cleaned[source.id]
                 merged = history_results[source.id]
                 source_summaries.append({
@@ -252,6 +306,7 @@ def run(config: config_module.ProjectConfig, workspace, progress: ProgressCallba
                     "corrected_records": merged.corrected,
                     "unchanged_records": merged.unchanged,
                     "closed_records": merged.closed,
+                    "skipped": False,
                 })
             result.sources = source_summaries
 
@@ -363,6 +418,40 @@ def run(config: config_module.ProjectConfig, workspace, progress: ProgressCallba
         archive.snapshot(workspace.archive, run_id,
                          [workspace.dashboard, workspace.dashboard_html, workspace.database],
                          keep=keep)
+
+        # Only now, after publication has actually succeeded, does a file stop being
+        # "not yet processed". A failed run must leave every file exactly where it
+        # was so the next run tries again - so this never runs on the error paths.
+        inbox_policy = config.inbox
+        for source in active_sources:
+            for item in discovered[source.id]:
+                file_rows = database.scalar(
+                    connection,
+                    "SELECT rows_read FROM run_files WHERE run_id = ? AND source_id = ?"
+                    " AND file_name = ?", (run_id, source.id, item.file_name)) or 0
+                ledger.record(connection, source.id, item.file_name, item.sha256, run_id,
+                             int(file_rows))
+                after_run = inbox_policy.get("after_run", "archive")
+                try:
+                    if after_run == "delete":
+                        if os.path.isfile(item.original_path):
+                            os.remove(item.original_path)
+                    elif after_run == "archive":
+                        if os.path.isfile(item.original_path):
+                            archive.archive_inbox_file(
+                                workspace, inbox_policy.get("archive_folder", "Processed"),
+                                item.original_path, item.file_name)
+                    # "keep" leaves the file exactly where it is; the ledger is what
+                    # stops it being reprocessed, not its absence from the inbox.
+                except OSError as exc:
+                    # Housekeeping, not correctness: the trusted result is already
+                    # published, so a locked or already-moved file is logged, not fatal.
+                    log.warning("[%s] could not apply inbox.after_run to %s: %s",
+                               run_id, item.original_path, exc)
+        archive.prune_processed_archive(
+            workspace, inbox_policy.get("archive_folder", "Processed"),
+            int(inbox_policy.get("archive_keep_days", 90)))
+
         emit(*_step("COMPLETE"))
         _write_events(connection, run_id, events)
         return result

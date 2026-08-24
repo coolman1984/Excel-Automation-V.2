@@ -34,8 +34,11 @@ _COLUMN_KEYS = {"source", "field", "type", "required", "trim", "default", "date_
 _ROOT_KEYS = {
     "project_name", "title", "language", "approval", "business", "sources",
     "relationships", "metrics_sql", "dashboard", "analytics", "insights", "quality_gates",
-    "automation", "sql_server", "database", "notes",
+    "automation", "sql_server", "database", "notes", "inbox",
 }
+
+_INBOX_KEYS = {"after_run", "archive_folder", "archive_keep_days", "reprocess_identical"}
+_INBOX_AFTER_RUN = {"archive", "keep", "delete"}
 
 
 @dataclasses.dataclass
@@ -105,6 +108,7 @@ class ProjectConfig:
     quality_gates: dict = dataclasses.field(default_factory=dict)
     sql_server: dict = dataclasses.field(default_factory=dict)
     database: dict = dataclasses.field(default_factory=dict)
+    inbox: dict = dataclasses.field(default_factory=dict)
 
     # -- helpers -----------------------------------------------------------
     def source(self, source_id: str) -> Source:
@@ -370,6 +374,24 @@ def load(path: str) -> ProjectConfig:
     if isinstance(title, str):
         title = {"en": title}
 
+    inbox_raw = dict(data.get("inbox") or {})
+    _check_unknown("inbox", inbox_raw, _INBOX_KEYS)
+    after_run = str(inbox_raw.get("after_run", "archive")).lower()
+    if after_run not in _INBOX_AFTER_RUN:
+        _fail("inbox", f"after_run '{after_run}' is not supported",
+              'Use "archive" (default; moves the file to keep the inbox current-only), '
+              '"keep" (leave it in place), or "delete".')
+    archive_keep_days = int(inbox_raw.get("archive_keep_days", 90))
+    if archive_keep_days < 0:
+        _fail("inbox", "archive_keep_days cannot be negative",
+              "Use 0 to keep archived files forever, or the number of days to retain them.")
+    inbox = {
+        "after_run": after_run,
+        "archive_folder": str(inbox_raw.get("archive_folder", "Processed")),
+        "archive_keep_days": archive_keep_days,
+        "reprocess_identical": bool(inbox_raw.get("reprocess_identical", False)),
+    }
+
     return ProjectConfig(
         project_name=project_name,
         root=os.path.dirname(os.path.abspath(path)),
@@ -386,6 +408,7 @@ def load(path: str) -> ProjectConfig:
         quality_gates=dict(data.get("quality_gates", {})),
         sql_server=dict(data.get("sql_server", {})),
         database=dict(data.get("database", {})),
+        inbox=inbox,
     )
 
 

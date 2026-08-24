@@ -9,14 +9,19 @@ the run still said ``VERIFYING``.
 
 from __future__ import annotations
 
+import datetime as _dt
 import json
 import os
 import unittest
 
 from engine import config as config_module, paths, pipeline
 from engine.data import archive
+from engine.excel.xlsx_writer import write_sheet
 from tests.helpers import (edit_config, example_workspace, project_copy, remove_all,
                            temp_dir)
+
+SALES_HEADERS = ["Invoice No", "Line", "Invoice Date", "Customer ID", "Product",
+                 "Quantity", "Unit Price", "Amount", "Status"]
 
 
 class PublicationTest(unittest.TestCase):
@@ -105,6 +110,13 @@ class PublicationTest(unittest.TestCase):
                  "required": True})
 
         edit_config(project, require_a_missing_column)
+        # The good run already archived the original sales fixture away (the
+        # default inbox.after_run), so a second run needs fresh content to
+        # actually be reprocessed - reprocessing nothing would just skip the
+        # source cleanly rather than exercising the new required column.
+        write_sheet(os.path.join(workspace.inbox, "sales_next.xlsx"), SALES_HEADERS,
+                   [["INV-9", 1, _dt.date(2026, 2, 1), "C001", "Pump", 1, 10.0, 10.0, "Posted"]],
+                   "Sales")
         failed = pipeline.run(config_module.load(project), workspace)
 
         self.assertEqual(failed.status, "BLOCK")

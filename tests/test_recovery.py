@@ -66,9 +66,36 @@ class RecoveryTest(unittest.TestCase):
             self.assertEqual(json.load(handle), self.good_dashboard)
         self.assertEqual(self._history(), before)
 
-    def test_missing_required_file_blocks_with_a_clear_next_action(self) -> None:
-        os.remove(os.path.join(self.workspace.inbox, "sales_current.xlsx"))
+    def test_a_required_source_that_already_succeeded_is_not_blocked_by_a_quiet_day(self) -> None:
+        """setUp already ran sales_current.xlsx through once successfully, and the
+        default inbox.after_run archives it away - exactly the state a rarely-
+        changing required source is in every day it is not re-supplied. Trusted
+        history already exists for it, so a day with nothing new must not block;
+        that would defeat unattended operation for any required source that does
+        not change daily. See test_missing_required_file_blocks_on_first_use for
+        the case that still must block: no trusted history yet at all."""
+
+        self.assertFalse(os.path.exists(os.path.join(self.workspace.inbox, "sales_current.xlsx")),
+                         "setUp's successful run should already have archived this file away")
+        before = self._history()
         result = self._run()
+        self.assertIn(result.status, ("PASS", "WARNING"), result.message)
+        self.assertEqual(self._history(), before)
+        sales = next(s for s in result.sources if s["source_id"] == "sales")
+        self.assertTrue(sales.get("skipped"))
+
+    def test_missing_required_file_blocks_on_first_use(self) -> None:
+        """A source that has never once succeeded still blocks clearly when its
+        file is missing - there is no trusted history yet to fall back on."""
+
+        project = project_copy(self.cleanup)
+        workspace = example_workspace(self.cleanup, with_fixtures=False)
+        # No sales_*.xlsx is ever placed in the inbox for this fresh workspace.
+        write_sheet(os.path.join(workspace.inbox, "customers.xlsx"),
+                   ["Customer ID", "Customer Name", "Segment", "Country"],
+                   [["C001", "Customer 01", "Retail", "Saudi Arabia"]], "Customers")
+        result = pipeline.run(config_module.load(project), workspace)
+
         self.assertEqual(result.status, "BLOCK")
         self.assertEqual(result.error["support_code"], "E-IN-001")
         self.assertIn("press Process again", result.error["next_action"])
