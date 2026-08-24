@@ -83,7 +83,20 @@ def inspect(path: str, delimiter: str | None = None, header_row: int = 1) -> tup
 
 
 def iter_rows(path: str, delimiter: str | None = None, header_row: int = 1,
-              max_rows: int | None = None) -> Iterator[tuple[int, list[object]]]:
+              max_rows: int | None = None,
+              strict_width: bool = True) -> Iterator[tuple[int, list[object]]]:
+    """Stream data rows. ``strict_width`` controls what happens to a row with
+    more columns than the header - typically an extra delimiter or a broken
+    quote.
+
+    The default, ``True``, raises immediately: a caller with no further context
+    cannot safely decide what a stray extra column means, so refusing the whole
+    file is the safe choice. A caller that can route the row somewhere visible
+    (staging quarantines it as a malformed row and keeps reading) passes
+    ``False`` and still receives the row, unmodified, so it can inspect and
+    record it - the row is never silently truncated either way.
+    """
+
     headers, encoding, delim = inspect(path, delimiter, header_row)
     width = len(headers)
     produced = 0
@@ -96,7 +109,7 @@ def iter_rows(path: str, delimiter: str | None = None, header_row: int = 1,
                 if not any(v.strip() for v in values):
                     continue
                 # Keep extra columns visible so header/data drift is not silently truncated.
-                if len(values) > width:
+                if len(values) > width and strict_width:
                     raise user_error(
                         "E-IN-003",
                         what_happened="A delimited row has more columns than its header.",

@@ -59,12 +59,14 @@ TOTAL = "total"
 BANNER = "banner"
 SECTION = "section"
 NOTE = "note"
+MALFORMED = "malformed"
 
 CLASS_TITLES = {
     TOTAL: "Total or subtotal line",
     BANNER: "Title or banner line",
     SECTION: "Section label",
     NOTE: "Note or footer line",
+    MALFORMED: "Malformed row (extra column)",
 }
 
 

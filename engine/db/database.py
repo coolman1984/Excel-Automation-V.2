@@ -125,6 +125,12 @@ class Connection:
 
     def executemany(self, sql: str, rows: Iterable[Sequence[object]]) -> Cursor:
         materialized = list(rows)
+        if not materialized:
+            # SQLite treats an empty batch as a silent no-op; DuckDB raises. A
+            # source that legitimately produced zero rows (no insights, an
+            # optional source with no file this run) must not turn into a run
+            # failure only on the production backend.
+            return Cursor(None, self.backend, 0)
         statement = _translate(sql, self.backend)
         raw = self.raw.executemany(statement, materialized)
         return Cursor(raw, self.backend, len(materialized))

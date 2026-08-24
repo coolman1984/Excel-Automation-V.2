@@ -135,6 +135,21 @@ class PortabilityTest(unittest.TestCase):
                 # Applying twice must be a no-op, not an error.
                 self.assertEqual(database.migrate(connection), [])
 
+    def test_executemany_with_an_empty_batch_does_not_raise(self):
+        """SQLite treats an empty batch as a silent no-op; DuckDB used to raise,
+        which meant a source that legitimately produced zero rows in a run (no
+        insights this run, an optional source with no file) could fail only on
+        the production backend."""
+
+        for backend in BACKENDS:
+            with self.subTest(backend=backend):
+                connection = self.connect(backend)
+                database.create_table(connection, "e", [("a", "TEXT")])
+                cursor = connection.executemany(
+                    "INSERT INTO e(a) VALUES (?)", [])
+                self.assertEqual(cursor.rowcount, 0)
+                self.assertEqual(database.scalar(connection, "SELECT COUNT(*) FROM e"), 0)
+
     def test_the_reserved_column_can_be_written_and_read(self):
         for backend in BACKENDS:
             with self.subTest(backend=backend):

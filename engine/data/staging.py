@@ -121,7 +121,8 @@ def stage(connection, run_id: str, source, files) -> StageResult:
                                                 header_row=source.header_row)
             row_iter = csv_reader.iter_rows(discovered.workspace_path,
                                              delimiter=source.delimiter,
-                                             header_row=source.header_row)
+                                             header_row=source.header_row,
+                                             strict_width=False)
         elif use_com:
             com_blocks = com_reader.iter_blocks(discovered.workspace_path, sheet=source.sheet,
                 header_row=source.header_row, chunk_rows=requested_chunk,
@@ -159,10 +160,32 @@ def stage(connection, run_id: str, source, files) -> StageResult:
         file_excluded = 0
         classifier = structure.Classifier(source)
 
+        header_width = len(headers)
         for row_number, values in row_iter:
             if classifier.should_stop(row_number):
                 break
             file_seen += 1
+
+            if source.format == "csv" and len(values) > header_width:
+                # An extra delimiter or a broken quote, not a business row: the
+                # header can't say which mapped field the stray value belongs to,
+                # so it is quarantined rather than guessed at or silently dropped.
+                file_excluded += 1
+                excluded_by_class[structure.MALFORMED] = (
+                    excluded_by_class.get(structure.MALFORMED, 0) + 1)
+                reason = (f"the row has {len(values)} columns but the header has "
+                         f"{header_width}; check for an extra delimiter or a broken quote.")
+                # zip() would silently drop exactly the stray value that makes
+                # the row malformed, so the extra column(s) are kept visible
+                # under their own key instead of being truncated away.
+                mapped_raw = dict(zip(headers, values[:header_width]))
+                if len(values) > header_width:
+                    mapped_raw["_extra_columns"] = values[header_width:]
+                _record_excluded(connection, run_id, source.id, discovered.file_name,
+                                 row_number, structure.Verdict(structure.MALFORMED, reason),
+                                 mapped_raw)
+                continue
+
             mapped: dict[str, object] = {}
             for column in source.columns:
                 index = positions.get(column.field)
