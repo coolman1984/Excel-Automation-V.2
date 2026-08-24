@@ -64,7 +64,7 @@ The parts that genuinely work and must be preserved:
 Not by reading alone. Each finding below is either a code citation or a reproduction.
 
 1. Read every engine module, the config contract, the packaging path, the web layer.
-2. Ran the full suite: **166 passed, 1 skipped** (`tests/test_browser.py`, no bundled browser fixture). *A green suite is why these defects survived — see §3.*
+2. Ran the full suite: **166 passed, 1 skipped** (`tests/test_browser.py`, no bundled browser). After installing Playwright + Chromium it becomes **167 passed, 0 skipped** — and that is the more damning result: `test_browser.py` passes while the light-mode report title is invisible (D1). The suite is green *because of* its blind spots, not despite them. See §3.
 3. Ran the shipped `example_sales` project end-to-end. Result `WARNING`, dashboard published.
 4. Rendered the generated `dashboard.html` in Chromium at 1440 px, 420 px, and in dark mode. Captured screenshots. No page errors, no horizontal overflow — the V14 report is accurate on those two points.
 5. **Built new Excel fixtures for the exact edge cases you named** and ran them through the real engine (`docs/review/edge_case_repro.py`).
@@ -273,7 +273,7 @@ fallback to the console path on failure.
 
 Rendered from the real generated `dashboard.html`.
 
-- **D1 — In light mode the report title is invisible.** `.topbar` at line 129 sets `color:#fff` over a dark `--brand` gradient. Line 421, inside a later block, redefines `.topbar` background to `color-mix(in srgb, var(--surface) 88%, transparent)` — near-white in light mode. **White text on a white bar.** Dark mode hides the bug, which is presumably why it shipped as "PASS in rendered QA".
+- **D1 — In light mode the report title is invisible** (and `test_browser.py` passes anyway)**.** `.topbar` at line 129 sets `color:#fff` over a dark `--brand` gradient. Line 421, inside a later block, redefines `.topbar` background to `color-mix(in srgb, var(--surface) 88%, transparent)` — near-white in light mode. **White text on a white bar.** Dark mode hides the bug, which is presumably why it shipped as "PASS in rendered QA".
 - **D2 — Root cause: the stylesheet is layered patches, not a system.** 468 lines, **39 selectors defined more than once**, with a block at line 418 labelled "V14 executive one-page refinement" overriding earlier rules. `.chart-grid` is defined twice with contradictory grids (2-column, then 12-column spans). `.kpi` appears 13 times, `.chart` 13 times.
 - **D3 — Marketing filler occupies the top of the results page.** The "Verified before it is published" trust card takes the prime slot and, in the exported copy where the intake card is hidden, sits alone in a 2-column grid leaving a large dead area.
 - **D4 — Inverted type hierarchy.** Section headings are `1.02rem`; the exception headline renders at `clamp(24px, 2.2vw, 36px)`. "2 row(s) were not used" is the largest text on the page, above the revenue figure.
@@ -727,7 +727,7 @@ currently making a promise it cannot keep, and E is where you are currently unha
 
 - `docs/review/edge_case_repro.py` — generates the three fixtures used for P0-1 and P0-3. Run it, then `PROJECT_TOOL run` against each folder to reproduce the results quoted above.
 - Baseline: commit 1 of this branch is the unmodified V14 template.
-- Suite at baseline: 166 passed, 1 skipped.
+- Suite at baseline: 166 passed, 1 skipped. With Playwright + Chromium installed: 167 passed, 0 skipped — including `test_browser.py`, while D1 is present.
 
 **Sources for §6:**
 [Dashboard Design Principles: The Definitive Guide (2026) — UXPin](https://www.uxpin.com/studio/blog/dashboard-design-principles/) ·
