@@ -19,7 +19,7 @@ import zipfile
 
 TEMPLATE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates")
 ENGINE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-ROOT_ENTRIES = ("START.bat", "QUICK_START.html", "Application")
+ROOT_ENTRIES = ("START.bat", "SCHEDULE.bat", "QUICK_START.html", "Application")
 EXCLUDE_DIRS = {"__pycache__", ".git", ".github", "node_modules", ".pytest_cache", "_work",
                 "fixtures", "tests"}
 EXCLUDE_SUFFIXES = (".pyc", ".pyo", ".log", ".db", ".db-wal", ".db-shm")
@@ -120,9 +120,11 @@ def build(project_name: str, app_dir: str, output_dir: str, display_name: str | 
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
         archive.writestr(f"{project_name}/START.bat",
                          _render_template("START.bat", display_name).replace("\n", "\r\n"))
+        archive.writestr(f"{project_name}/SCHEDULE.bat",
+                         _render_template("SCHEDULE.bat", display_name).replace("\n", "\r\n"))
         archive.writestr(f"{project_name}/QUICK_START.html",
                          _render_template("QUICK_START.html", display_name))
-        files += 2
+        files += 3
         for directory, subdirectories, names in os.walk(app_dir):
             subdirectories[:] = [d for d in subdirectories if d not in EXCLUDE_DIRS]
             for name in sorted(names):

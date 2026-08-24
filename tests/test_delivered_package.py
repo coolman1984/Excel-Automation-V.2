@@ -84,9 +84,9 @@ class DeliveredPackageTest(unittest.TestCase):
             return json.loads(response.read().decode())
 
     # -- the shape the user receives ---------------------------------------
-    def test_the_user_sees_only_three_things(self) -> None:
+    def test_the_user_sees_only_four_things(self) -> None:
         self.assertEqual(sorted(os.listdir(self.package_root)),
-                         ["Application", "QUICK_START.html", "START.bat"])
+                         ["Application", "QUICK_START.html", "SCHEDULE.bat", "START.bat"])
 
     def test_the_package_passes_verification(self) -> None:
         self.assertTrue(self.verification.ok, self.verification.report())

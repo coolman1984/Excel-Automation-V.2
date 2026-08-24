@@ -13,7 +13,7 @@ import posixpath
 import re
 import zipfile
 
-ALLOWED_ROOT = {"START.bat", "QUICK_START.html", "Application"}
+ALLOWED_ROOT = {"START.bat", "SCHEDULE.bat", "QUICK_START.html", "Application"}
 FORBIDDEN_IN_START = [
     (r"\bpip\b", "installs packages"),
     (r"\bpython\s+-m\s+(pip|venv|ensurepip)\b", "installs packages"),
@@ -24,6 +24,12 @@ FORBIDDEN_IN_START = [
     (r"\brunas\b|\bsc\s+create\b|\breg\s+add\b|schtasks", "needs administrator rights"),
     (r"\bpy\s+-3\b|C:\\\\Python|Program Files\\\\Python", "uses a system Python"),
     (r"\bnpm\b|\bnode\b|\byarn\b", "needs Node.js"),
+]
+FORBIDDEN_IN_SCHEDULE = [
+    (r"\brunas\b", "needs administrator rights"),
+    (r"/ru\b", "runs the scheduled task as a different account, which needs a stored password"),
+    (r"/rp\b", "stores a Windows account password"),
+    (r"\bnet\s+localgroup\b|\bicacls\b|\btakeown\b", "changes account or file permissions"),
 ]
 FORBIDDEN_APP_TOP = {".git", ".github", "tests", "wheelhouse", "node_modules", ".ai", "docs",
                      ".venv", "venv", "build", "dist"}
@@ -155,7 +161,7 @@ def verify(zip_path: str, require_runtime: bool = True) -> VerifyResult:
             findings.append(Finding("BLOCK", "E-PKG-001",
                                     f"unexpected entry at the package root: {unexpected}. "
                                     f"Only {sorted(ALLOWED_ROOT)} may be visible."))
-        for required in ("START.bat", "QUICK_START.html", "Application"):
+        for required in ("START.bat", "SCHEDULE.bat", "QUICK_START.html", "Application"):
             if required not in second_level:
                 findings.append(Finding("BLOCK", "E-PKG-001", f"{required} is missing"))
 
@@ -189,6 +195,17 @@ def verify(zip_path: str, require_runtime: bool = True) -> VerifyResult:
             if "Application" not in content:
                 findings.append(Finding("BLOCK", "E-PKG-001",
                                         "START.bat does not start the internal application"))
+
+        schedule_name = f"{prefix}SCHEDULE.bat"
+        if schedule_name in names:
+            content = archive.read(schedule_name).decode("utf-8", "replace")
+            for pattern, why in FORBIDDEN_IN_SCHEDULE:
+                if re.search(pattern, content, re.IGNORECASE):
+                    findings.append(Finding("BLOCK", "E-PKG-001",
+                                            f"SCHEDULE.bat {why} (matched /{pattern}/)"))
+            if "--run-once" not in content:
+                findings.append(Finding("BLOCK", "E-PKG-001",
+                                        "SCHEDULE.bat does not schedule an unattended run"))
 
         if not any(n.startswith(f"{prefix}Application/app/project/") for n in names):
             findings.append(Finding("BLOCK", "E-PKG-001",

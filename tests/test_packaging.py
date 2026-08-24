@@ -35,11 +35,11 @@ class PackagingTest(unittest.TestCase):
         return result.zip_path
 
     # -- the good shape ----------------------------------------------------
-    def test_package_has_only_the_three_visible_entries(self) -> None:
+    def test_package_has_only_the_four_visible_entries(self) -> None:
         zip_path = self.build_package()
         with zipfile.ZipFile(zip_path) as archive:
             roots = {name.split("/")[1] for name in archive.namelist() if "/" in name}
-        self.assertEqual(roots, {"START.bat", "QUICK_START.html", "Application"})
+        self.assertEqual(roots, {"START.bat", "SCHEDULE.bat", "QUICK_START.html", "Application"})
 
     def test_package_verifies(self) -> None:
         result = verifier.verify(self.build_package())
@@ -66,6 +66,15 @@ class PackagingTest(unittest.TestCase):
         for forbidden in ("pip", "git", "curl", "netsh", "runas", "winget"):
             self.assertNotIn(forbidden, content.lower())
 
+    def test_schedule_bat_registers_an_unattended_run_without_elevation(self) -> None:
+        with zipfile.ZipFile(self.build_package()) as archive:
+            content = archive.read("ExampleSales/SCHEDULE.bat").decode()
+        self.assertIn("pythonw.exe", content)
+        self.assertIn("--run-once", content)
+        self.assertIn("schtasks", content)
+        for forbidden in ("pip", "git", "curl", "netsh", "runas", "winget", "/ru ", "/rp "):
+            self.assertNotIn(forbidden, content.lower())
+
     # -- the shapes that must be refused -----------------------------------
     def _zip_with(self, entries: dict[str, str]) -> str:
         path = os.path.join(self.work, "bad.zip")
@@ -79,6 +88,9 @@ class PackagingTest(unittest.TestCase):
     def _good_entries(self) -> dict[str, str]:
         return {
             "Demo/START.bat": 'start "" "%~dp0Application\\runtime\\pythonw.exe" "%~dp0Application\\app\\launch.py"',
+            "Demo/SCHEDULE.bat": ('schtasks /create /tn "Demo" /tr "\\"%~dp0Application\\runtime\\'
+                                  'pythonw.exe\\" \\"%~dp0Application\\app\\launch.py\\" --run-once"'
+                                  ' /sc HOURLY /mo 1 /f'),
             "Demo/QUICK_START.html": "<html></html>",
             "Demo/Application/app/launch.py": "print('x')",
             "Demo/Application/app/project/project.json": "{}",
@@ -101,6 +113,26 @@ class PackagingTest(unittest.TestCase):
         entries = self._good_entries()
         del entries["Demo/START.bat"]
         self.assertTrue(any("START.bat is missing" in message for message in self._blocks(entries)))
+
+    def test_missing_schedule_is_refused(self) -> None:
+        entries = self._good_entries()
+        del entries["Demo/SCHEDULE.bat"]
+        self.assertTrue(any("SCHEDULE.bat is missing" in message
+                            for message in self._blocks(entries)))
+
+    def test_schedule_bat_that_would_need_elevation_is_refused(self) -> None:
+        for command in ("runas /user:Administrator x.exe",
+                        'schtasks /create /tn "Demo" /tr "x" /sc DAILY /ru SYSTEM',
+                        'schtasks /create /tn "Demo" /tr "x" /sc DAILY /rp secret123'):
+            entries = self._good_entries()
+            entries["Demo/SCHEDULE.bat"] = entries["Demo/SCHEDULE.bat"] + "\r\n" + command
+            self.assertTrue(self._blocks(entries), command)
+
+    def test_schedule_bat_that_does_not_schedule_run_once_is_refused(self) -> None:
+        entries = self._good_entries()
+        entries["Demo/SCHEDULE.bat"] = 'schtasks /create /tn "Demo" /tr "x" /sc HOURLY /mo 1'
+        self.assertTrue(any("does not schedule an unattended run" in message
+                            for message in self._blocks(entries)))
 
     def test_missing_runtime_is_refused(self) -> None:
         entries = self._good_entries()

@@ -186,3 +186,12 @@ A file is only processed when its content changed, so nothing is duplicated by
 looking twice. For unattended runs use a scheduler and
 `Application\runtime\pythonw.exe Application\app\launch.py --run-once`, which
 processes what is waiting and exits with a status code.
+
+The delivered package ships `SCHEDULE.bat` at its root for exactly this: it
+registers a per-user Windows scheduled task (hourly or daily) that calls
+`--run-once`, with no administrator rights and no stored password. A
+scheduled run has no console to watch, so a failure there - a broken
+configuration or a blocked publish - is written to `NEEDS_ATTENTION.txt`
+next to `START.bat` instead; that file is removed automatically the next
+time a run succeeds, so it only ever appears when something actually needs
+a person's attention.

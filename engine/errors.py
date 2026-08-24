@@ -57,6 +57,7 @@ CODES = {
     "E-PKG-001": "The delivered package does not have the approved shape.",
     "E-RUN-001": "The run stopped before it finished.",
     "E-RUN-002": "Another process is already running this report.",
+    "E-RUN-003": "Automatic scheduling could not be set up.",
 }
 
 
