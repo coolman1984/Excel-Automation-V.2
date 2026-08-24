@@ -97,6 +97,17 @@ def structure_checks(run_id: str, source, staged) -> list[Check]:
                             expected=expected, actual=actual, difference=difference,
                             status=status))
 
+    if staged.guessed_columns:
+        parts = "; ".join(f"{file_name}: {resolution.describe()}"
+                          for file_name, resolution in staged.guessed_columns[:8])
+        checks.append(Check(
+            source_id=source.id, name="column_mapping",
+            expected="every mapped column matched the file by its configured name",
+            actual=(f"{_plural(len(staged.guessed_columns), 'column')} matched by a looser "
+                    f"rule, not an exact name: {parts}"),
+            difference=str(len(staged.guessed_columns)),
+            status="WARNING"))
+
     if staged.suspected_totals:
         rows = ", ".join(f"row {item.excel_row} ({item.text!r})"
                          for _f, item in staged.suspected_totals[:5])

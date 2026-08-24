@@ -27,10 +27,10 @@ _SOURCE_KEYS = {
     "id", "title", "required", "match", "format", "sheet", "header_row", "delimiter",
     "grain", "business_key", "corrections_allowed", "missing_record_policy",
     "columns", "checks", "control_totals", "filters", "notes", "extraction",
-    "update_mode", "period_field", "structure",
+    "update_mode", "period_field", "structure", "column_order",
 }
 _COLUMN_KEYS = {"source", "field", "type", "required", "trim", "default", "date_formats",
-                "notes", "scale"}
+                "notes", "scale", "aliases"}
 _ROOT_KEYS = {
     "project_name", "title", "language", "approval", "business", "sources",
     "relationships", "metrics_sql", "dashboard", "analytics", "insights", "quality_gates",
@@ -49,6 +49,7 @@ class Column:
     date_formats: list[str] = dataclasses.field(default_factory=list)
     notes: str = ""
     scale: int = types.DEFAULT_SCALE
+    aliases: list[str] = dataclasses.field(default_factory=list)
 
 
 @dataclasses.dataclass
@@ -68,6 +69,7 @@ class Source:
     missing_record_policy: str = "keep"
     extraction: dict = dataclasses.field(default_factory=dict)
     structure: dict = dataclasses.field(default_factory=dict)
+    column_order: str = "unstable"
     update_mode: str = "UPSERT"
     period_field: str = ""
     checks: list[dict] = dataclasses.field(default_factory=list)
@@ -167,13 +169,15 @@ def _parse_column(where: str, data: dict) -> Column:
     if "scale" in data and kind != "number":
         _fail(where, f"scale applies to 'number' columns, not '{kind}'",
               "Remove 'scale', or change the column type to number.")
+    aliases = [str(a).strip() for a in data.get("aliases", []) if str(a).strip()]
     return Column(source=source, field=field, type=kind,
                   required=bool(data.get("required", False)),
                   trim=bool(data.get("trim", True)),
                   default=data.get("default"),
                   date_formats=list(data.get("date_formats", [])),
                   notes=str(data.get("notes", "")),
-                  scale=scale)
+                  scale=scale,
+                  aliases=aliases)
 
 
 def _parse_source(index: int, data: dict) -> Source:
@@ -255,6 +259,12 @@ def _parse_source(index: int, data: dict) -> Source:
         _fail(f"{where}.structure", "stop_after_blank_rows cannot be negative",
               "Use 0 to read the whole sheet, or the number of blank rows that ends the data.")
 
+    column_order = str(data.get("column_order", "unstable")).lower()
+    if column_order not in {"unstable", "stable"}:
+        _fail(where, f"column_order '{column_order}' is not supported",
+              'Use "unstable" (default; positions may vary between files) or "stable" '
+              '(positions do not change, enabling a positional fallback match).')
+
     for position, check in enumerate(data.get("checks", [])):
         location = f"{where}.checks[{position}]"
         kind = check.get("type")
@@ -293,6 +303,7 @@ def _parse_source(index: int, data: dict) -> Source:
         missing_record_policy=policy,
         extraction=extraction,
         structure=layout,
+        column_order=column_order,
         update_mode=update_mode,
         period_field=period_field,
         checks=list(data.get("checks", [])),

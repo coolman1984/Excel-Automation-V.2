@@ -37,6 +37,11 @@ _ARABIC_FOLD = str.maketrans({
     "أ": "ا", "إ": "ا", "آ": "ا", "ٱ": "ا", "ى": "ي", "ئ": "ي", "ة": "ه", "ؤ": "و",
 })
 _NON_WORD = re.compile(r"[^\w؀-ۿ]+")
+# One trailing parenthetical unit/currency/percent suffix: "Amount (SAR)" -> "Amount".
+# Stripped before folding so the bracket boundary is still visible; a header that is
+# nothing but a parenthetical ("(Total)") is left alone rather than emptied out.
+_TRAILING_UNIT_RE = re.compile(r"\s*\([^()]{1,24}\)\s*$")
+_ARABIC_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
 
 # The whole cell says nothing but "total". Safe to act on alone.
 STANDALONE_LABELS = {
@@ -78,9 +83,12 @@ def normalize(text: object) -> str:
     and ``"الإجمالي"`` become ``"total jan"`` and ``"الاجمالي"``.
     """
 
-    value = str("" if text is None else text).strip().casefold()
+    raw = str("" if text is None else text).strip()
+    without_unit = _TRAILING_UNIT_RE.sub("", raw)
+    value = (without_unit if without_unit.strip() else raw).casefold()
     value = _ARABIC_MARKS.sub("", value)
     value = value.translate(_ARABIC_FOLD)
+    value = value.translate(_ARABIC_DIGITS)
     value = _NON_WORD.sub(" ", value)
     return re.sub(r"\s+", " ", value).strip()
 

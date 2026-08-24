@@ -13,7 +13,7 @@ import datetime as _dt
 import json
 import os
 
-from engine.data import structure
+from engine.data import resolve, structure
 from engine.db import database
 from engine.errors import user_error
 from engine.excel import com_reader, csv_reader, xlsx_reader
@@ -33,6 +33,7 @@ class StageResult:
     excluded_by_class: dict = dataclasses.field(default_factory=dict)
     declared_totals: list = dataclasses.field(default_factory=list)
     suspected_totals: list = dataclasses.field(default_factory=list)
+    guessed_columns: list = dataclasses.field(default_factory=list)   # (file_name, Resolution)
 
 
 def stage_table(source_id: str) -> str:
@@ -53,42 +54,41 @@ def _as_text(value: object) -> str | None:
     return str(value)
 
 
-def _map_headers(source, headers: list[str], file_name: str) -> tuple[dict[str, int], list[str]]:
-    lookup = {}
-    duplicates = set()
-    for index, header in enumerate(headers):
-        key = str(header).strip().lower()
-        if not key:
-            continue
-        if key in lookup:
-            duplicates.add(key)
-        else:
-            lookup[key] = index
-    expected = {c.source.strip().lower() for c in source.columns}
-    ambiguous = sorted(duplicates & expected)
-    if ambiguous:
+def _map_headers(source, headers: list[str], file_name: str
+                 ) -> tuple[dict[str, int], list[str], list[resolve.Resolution]]:
+    """Resolve every mapped column against this file's header row.
+
+    An exact rename or a declared alias is resolved silently. Anything found
+    only through the normalised, fuzzy or positional rungs is still resolved -
+    the run is not blocked over an ordinary rename - but is returned as a
+    "guess" so the caller can name it in the drift report and keep the run at
+    WARNING rather than a silent PASS.
+    """
+
+    result = resolve.resolve(source, headers)
+    if result.ambiguous:
+        first = result.ambiguous[0]
+        if first.rung == resolve.RUNG_EXACT:
+            raise user_error(
+                "E-IN-003",
+                what_happened="A required column name appears more than once in the source header.",
+                next_action=(f"Rename the duplicate column(s) {sorted({first.column})} in "
+                             f"'{file_name}' so each mapped column is unique."),
+                detail=f"headers={headers}")
         raise user_error(
             "E-IN-003",
-            what_happened="A required column name appears more than once in the source header.",
-            next_action=f"Rename the duplicate column(s) {ambiguous} in '{file_name}' so each mapped column is unique.",
-            detail=f"headers={headers}")
-    positions: dict[str, int] = {}
-    missing_required: list[str] = []
-    missing_optional: list[str] = []
-    for column in source.columns:
-        index = lookup.get(column.source.strip().lower())
-        if index is None:
-            (missing_required if column.required else missing_optional).append(column.source)
-            continue
-        positions[column.field] = index
-    if missing_required:
+            what_happened=f"More than one column in '{file_name}' could be '{first.column}'.",
+            next_action=(f"Rename one of {first.candidates} in '{file_name}', or map "
+                         f"'{first.column}' to an unambiguous name."),
+            detail=f"rung={first.rung} headers={headers}")
+    if result.missing_required:
         raise user_error(
             "E-IN-003",
-            next_action=(f"Add the column(s) {missing_required} to '{file_name}', or update the "
-                         f"source mapping for '{source.id}'."),
+            next_action=(f"Add the column(s) {result.missing_required} to '{file_name}', or update "
+                         f"the source mapping for '{source.id}'."),
             detail=f"file columns = {headers}",
         )
-    return positions, missing_optional
+    return result.positions, result.missing_optional, result.guessed
 
 
 def stage(connection, run_id: str, source, files) -> StageResult:
@@ -106,6 +106,7 @@ def stage(connection, run_id: str, source, files) -> StageResult:
     excluded_by_class: dict[str, int] = {}
     declared_totals: list = []
     suspected_totals: list = []
+    guessed_columns: list = []
     missing_optional: list[str] = []
     extraction = source.extraction or {}
     requested_chunk = max(250, int(extraction.get("chunk_rows", 5000)))
@@ -149,8 +150,9 @@ def stage(connection, run_id: str, source, files) -> StageResult:
                 headers, _ = next(com_blocks)
                 row_iter = (row for _headers, block in com_blocks for row in block)
 
-        positions, optional = _map_headers(source, headers, discovered.file_name)
+        positions, optional, guessed = _map_headers(source, headers, discovered.file_name)
         missing_optional.extend(o for o in optional if o not in missing_optional)
+        guessed_columns.extend((discovered.file_name, resolution) for resolution in guessed)
 
         # Keep each database insert bounded by both rows and an approximate cell count.
         batch_limit = max(250, min(requested_chunk, max(250, 120000 // max(1, len(columns)))))
@@ -235,7 +237,8 @@ def stage(connection, run_id: str, source, files) -> StageResult:
                        rows_seen=rows_seen, rows_excluded=rows_excluded,
                        excluded_by_class=excluded_by_class,
                        declared_totals=declared_totals,
-                       suspected_totals=suspected_totals)
+                       suspected_totals=suspected_totals,
+                       guessed_columns=guessed_columns)
 
 
 def _record_excluded(connection, run_id: str, source_id: str, file_name: str, row_number: int,
