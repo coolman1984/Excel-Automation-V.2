@@ -84,6 +84,13 @@ class Workspace:
     def log_file(self) -> str:
         return os.path.join(self.logs, "application.log")
 
+    @property
+    def run_lock(self) -> str:
+        """Cross-process lock so the interactive app and a scheduled
+        --run-once can never touch the warehouse at the same time."""
+
+        return os.path.join(self.data, "run.lock")
+
     def run_dir(self, run_id: str) -> str:
         return os.path.join(self.runs, run_id)
 

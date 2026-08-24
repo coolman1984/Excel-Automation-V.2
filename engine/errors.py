@@ -56,6 +56,7 @@ CODES = {
     "E-SQL-001": "A project calculation failed.",
     "E-PKG-001": "The delivered package does not have the approved shape.",
     "E-RUN-001": "The run stopped before it finished.",
+    "E-RUN-002": "Another process is already running this report.",
 }
 
 

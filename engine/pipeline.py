@@ -23,6 +23,7 @@ from engine.db import database
 from engine.errors import UserError, user_error
 from engine.excel import discovery
 from engine.logging_setup import logger
+from engine.runlock import LockHeld, RunLock
 from engine.report import dashboard as dashboard_module, standalone
 from engine.sync import sql_server
 
@@ -111,6 +112,22 @@ def run(config: config_module.ProjectConfig, workspace, progress: ProgressCallba
         if progress is not None:
             progress(state, percent, message)
 
+    lock = RunLock(workspace.run_lock)
+    try:
+        lock.acquire()
+    except LockHeld:
+        wrapped = user_error(
+            "E-RUN-002",
+            next_action="Wait a moment for the other run to finish, then try again.",
+            detail=f"run_lock={workspace.run_lock}")
+        result.status = "BLOCK"
+        result.state = "FAILED"
+        result.error = wrapped.to_dict()
+        result.message = wrapped.what_happened
+        result.finished_at = _dt.datetime.now().isoformat(timespec="seconds")
+        _write_state(workspace, run_id, "FAILED", 100, result.message, "BLOCK")
+        return result
+
     backend = str((config.database or {}).get("backend", "auto"))
     try:
         connection = database.connect(workspace.database, backend=backend)
@@ -127,6 +144,7 @@ def run(config: config_module.ProjectConfig, workspace, progress: ProgressCallba
         result.message = wrapped.what_happened
         result.finished_at = _dt.datetime.now().isoformat(timespec="seconds")
         _write_state(workspace, run_id, "FAILED", 100, result.message, "BLOCK")
+        lock.release()
         return result
 
     document: dict | None = None
@@ -488,6 +506,7 @@ def run(config: config_module.ProjectConfig, workspace, progress: ProgressCallba
         return result
     finally:
         connection.close()
+        lock.release()
 
 
 def _step(name: str) -> tuple[str, int, str]:
